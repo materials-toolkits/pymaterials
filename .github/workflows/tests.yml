@@ -17,4 +17,6 @@ jobs:
       - name: Run image
         uses: abatilo/actions-poetry@v2
       - name: poetry test
-        run: poetry run pytest
+        run: |
+          poetry install
+          poetry run pytest
