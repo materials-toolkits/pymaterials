@@ -21,9 +21,7 @@ jobs:
           python-version: "3.10"
       - name: Run image
         uses: abatilo/actions-poetry@v2
-      - name: poetry install
-        run: |
-          poetry install
-          poetry config pypi-token.pypi $PYPI_TOKEN
+      - name: poetry configure
+        run: poetry config pypi-token.pypi $PYPI_TOKEN
       - name: deploy
         run: poetry publish --build

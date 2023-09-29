@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "materials-toolkit"
-version = "0.1.0"
+version = "0.1.1"
 description = "materials-toolkit is a python package created to facilitate the development of machine learning models in materials science"
 authors = ["Astrid Klipfel <astridklipfel@gmail.com>"]
 readme = "README.md"
