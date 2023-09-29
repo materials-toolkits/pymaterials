@@ -6,6 +6,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: materials-toolkits/pymaterials@main
+      id: pymaterials
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
         create_readme: true
