@@ -1,9 +1,8 @@
 name: Deploy package
 
 on:
-  push:
-    branches:
-      - main
+  release:
+    types: [published]
 
 concurrency:
   group: "pypi"
