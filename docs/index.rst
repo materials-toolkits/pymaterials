@@ -6,6 +6,8 @@
 Welcome to Materials toolkit's documentation!
 =============================================
 
+Github repo: https://github.com/materials-toolkits/pymaterials
+
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
