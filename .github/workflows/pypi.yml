@@ -1,6 +1,7 @@
 name: Deploy package
 
 on:
+  workflow_dispatch:
   release:
     types: [published]
 
