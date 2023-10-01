@@ -16,6 +16,8 @@ optional = true
 
 [tool.poetry.group.test.dependencies]
 pytest = "^6.0.0"
+coverage = "*"
+coverage-badge = "*"
 
 [tool.poetry.group.docs]
 optional = true

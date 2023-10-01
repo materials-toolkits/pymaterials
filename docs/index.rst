@@ -8,6 +8,9 @@ Welcome to Materials toolkit's documentation!
 
 Github repo: https://github.com/materials-toolkits/pymaterials
 
+.. raw:: html
+   :file: _static/images/coverage.svg
+
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
