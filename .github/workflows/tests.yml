@@ -21,6 +21,8 @@ jobs:
       - name: Run image
         uses: abatilo/actions-poetry@v2
       - name: poetry install
-        run: poetry install --with test
+        run: |
+          poetry install --with test
+          poetry run pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.0.0+cpu.html
       - name: poetry test
         run: poetry run pytest

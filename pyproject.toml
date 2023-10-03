@@ -6,23 +6,12 @@ authors = ["Astrid Klipfel <astridklipfel@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.10"
-#torch = "^2.0.1"
-torch = [
-    { extras = [
-    ], version = "^2.0", source = "PyPI" },
-    { extras = [
-        "cpu",
-    ], version = "==2.0.1+cpu", source = "pytorch cpu" },
-    { extras = [
-        "cu117",
-    ], version = "==2.0.1+cu117", source = "pytorch cu117" },
-    { extras = [
-        "cu118",
-    ], version = "==2.0.1+cu118", source = "pytorch cu118" },
-]
-torch_geometric = "^2.3.1"
-httpx = { version = "^0.22.0", source = "pypi" }
+python = ">=3.9"
+torch = "2.0.*"
+torch_geometric = "2.3.*"
+pymatgen = ">=2023.7.17"
+spgrep = ">=0.3.0"
+httpx = { version = "^0.23.0", source = "pypi" }
 
 [tool.poetry.group.test]
 optional = true
@@ -39,31 +28,6 @@ optional = true
 sphinx = "^7.2"
 sphinx-rtd-theme = "*"
 myst-parser = "*"
-
-[[tool.poetry.source]]
-name = "PyPI"
-priority = "primary"
-
-[[tool.poetry.source]]
-name = "pytorch cpu"
-url = "https://download.pytorch.org/whl/cpu"
-priority = "supplemental"
-
-[[tool.poetry.source]]
-name = "pytorch cu117"
-url = "https://download.pytorch.org/whl/cu117"
-priority = "supplemental"
-
-[[tool.poetry.source]]
-name = "pytorch cu118"
-url = "https://download.pytorch.org/whl/cu118"
-priority = "supplemental"
-
-
-[tool.poetry.extras]
-cpu = []
-cu117 = []
-cu118 = []
 
 [build-system]
 requires = ["poetry-core"]
