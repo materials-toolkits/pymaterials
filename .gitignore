@@ -1,5 +1,4 @@
 .vscode
 __pycache__
 dist
-poetry.lock
 .coverage

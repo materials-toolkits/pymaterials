@@ -26,7 +26,9 @@ jobs:
       - name: Run image
         uses: abatilo/actions-poetry@v2
       - name: poetry install
-        run: poetry install --with test,docs
+        run: |
+          poetry lock --with test,docs
+          poetry install --with test
       - name: unit testing
         run: poetry run coverage run -m pytest
       - name: generate coverage badge
