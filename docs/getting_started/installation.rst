@@ -21,7 +21,9 @@ Create a virtual environment and activate it:
 Torch, PyG and CUDA (optional)
 ******************************
 
-> Warning, the command `pip install materials-toolkit` will install the default version of pytorch and torch-geometric. To install a specific version of these packages to match your cuda version you should install them manually before installing Materials toolkit.
+.. warning::
+
+    The command `pip install materials-toolkit` will install the default version of pytorch and torch-geometric. To install a specific version of these packages to match your cuda version you should install them manually before installing Materials toolkit.
 
 Installation of Torch and PyG with a specific cuda version (can be cpu):
 
