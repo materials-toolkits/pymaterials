@@ -13,9 +13,10 @@ Github repo: https://github.com/materials-toolkits/pymaterials
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :titlesonly:
+   :caption: Getting started!
 
-
+   getting_started/installation
 
 Indices and tables
 ==================

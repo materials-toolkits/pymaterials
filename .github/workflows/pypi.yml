@@ -24,4 +24,6 @@ jobs:
       - name: poetry configure
         run: poetry config pypi-token.pypi $PYPI_TOKEN
       - name: deploy
-        run: poetry publish --build
+        run: |
+          poetry lock
+          poetry publish --build
