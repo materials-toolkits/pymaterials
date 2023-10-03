@@ -1,4 +1,4 @@
 def test_version():
     import materials_toolkit
 
-    assert materials_toolkit.__version__ == "0.1.2"
+    assert materials_toolkit.__version__ == "0.1.3"
