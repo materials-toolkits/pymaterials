@@ -1,4 +1,4 @@
-name: Unit testing
+name: Fast unit testing
 
 on:
   workflow_dispatch:

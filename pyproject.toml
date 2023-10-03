@@ -28,6 +28,7 @@ optional = true
 sphinx = "^7.2"
 sphinx-rtd-theme = "*"
 myst-parser = "*"
+sphinx-copybutton = "*"
 
 [build-system]
 requires = ["poetry-core"]
