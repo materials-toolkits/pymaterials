@@ -7,10 +7,12 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = ">=3.9"
-torch = "2.0.*"
+torch = "^2"
 torch_geometric = "2.3.*"
 pymatgen = ">=2023.7.17"
 spgrep = ">=0.3.0"
+h5py = "*"
+tqdm = "*"
 httpx = { version = "^0.22.0", source = "pypi" }
 
 [tool.poetry.group.test]
