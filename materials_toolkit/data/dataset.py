@@ -1,3 +1,4 @@
+from unittest import result
 import torch
 import torch.nn.functional as F
 from torch_geometric import data
@@ -5,7 +6,7 @@ import h5py
 import numpy as np
 from tqdm import tqdm
 
-from typing import List, Tuple, Any, Optional, Union, Callable
+from typing import List, Tuple, Any, Optional, Union, Callable, Dict
 import urllib.request
 import os
 import hashlib
@@ -17,6 +18,52 @@ from .data import StructureData
 
 def preprocess_jobs():
     pass
+
+
+class HDF5FileWrapper(h5py.File):
+    def __init__(self, *args, load: bool = False, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.local: Dict[str, torch.Tensor] = None
+
+        if load:
+            self.load()
+
+    @staticmethod
+    def load_dataset(dataset: h5py.Dataset) -> Dict[str, torch.Tensor]:
+        result = {}
+        for key, value in dataset.items():
+            if isinstance(value, h5py.Group):
+                inner_dict = HDF5FileWrapper.load_dataset(value)
+                for inner_key, inner_value in inner_dict.items():
+                    result[os.path.join(key, inner_key)] = inner_value
+            else:
+                result[key] = torch.from_numpy(value[:])
+
+        return result
+
+    def load(self):
+        self.local = HDF5FileWrapper.load_dataset(self)
+
+    def shape(self, key: str) -> tuple:
+        return self[key].shape
+
+    def is_loaded(self) -> bool:
+        return self.local is not None
+
+    def __getitem__(self, key: str) -> torch.Tensor:
+        if self.local is None:
+            return torch.from_numpy(super().__getitem__(key))
+        else:
+            return self.local[key]
+
+    def __setitem__(self, key: str, tensor: Union[np.ndarray, torch.Tensor]):
+        self.local = None
+
+        if isinstance(tensor, torch.Tensor):
+            tensor = tensor.numpy()
+
+        return super().__setitem__(key, tensor)
 
 
 class HDF5Dataset(data.Dataset):
@@ -73,7 +120,9 @@ class HDF5Dataset(data.Dataset):
             **kwargs,
         )
 
-        self.data_hdf5 = h5py.File(self.processed_file, "r")
+        self.data_hdf5 = HDF5FileWrapper(self.processed_file, "r")
+        if self.in_memory:
+            self.data_hdf5.load()
 
     @property
     def raw_file_names(self) -> str:
@@ -125,14 +174,10 @@ class HDF5Dataset(data.Dataset):
     @staticmethod
     def index_from_ptr(
         idx: torch.LongTensor,
-        ptr: Union[torch.LongTensor, h5py.Dataset],
+        ptr: torch.LongTensor,
     ) -> torch.LongTensor:
-        if isinstance(ptr, h5py.Dataset):
-            length = torch.from_numpy(ptr[idx + 1] - ptr[idx])
-            ptr = torch.from_numpy(ptr[idx])
-        else:
-            length = ptr.index_select(0, idx + 1) - ptr.index_select(0, idx)
-            ptr = ptr.index_select(0, idx)
+        length = ptr.index_select(0, idx + 1) - ptr.index_select(0, idx)
+        ptr = ptr.index_select(0, idx)
 
         print(idx, ptr, length)
 
@@ -144,12 +189,12 @@ class HDF5Dataset(data.Dataset):
         return atoms_idx
 
     @staticmethod
-    def length_hdf5(file: h5py.File) -> int:
-        return file["structures/natoms"].shape[0]
+    def length_hdf5(file: HDF5FileWrapper) -> int:
+        return file.shape("structures/natoms")[0]
 
     @staticmethod
     def read_hdf5(
-        file: h5py.File,
+        file: HDF5FileWrapper,
         idx: Union[int, np.ndarray, torch.LongTensor],
         scalars_keys: Optional[List[str]] = [],
     ) -> Union[StructureData, List[StructureData]]:
@@ -204,7 +249,7 @@ class HDF5Dataset(data.Dataset):
         return structs
 
     @staticmethod
-    def write_hdf5(file: h5py.File, structures: List[StructureData]):
+    def write_hdf5(file: HDF5FileWrapper, structures: List[StructureData]):
         structures = data.Batch.from_data_list(structures)
 
         for key, tensor in structures.to_dict().iter():
@@ -225,7 +270,7 @@ class HDF5Dataset(data.Dataset):
             )
 
         if preprocessing:
-            raw_data = h5py.File(self.raw_file, "r")
+            raw_data = HDF5FileWrapper(self.raw_file, "r")
 
             processed_dataset = []
             length = HDF5Dataset.length_hdf5(raw_data)
@@ -243,7 +288,7 @@ class HDF5Dataset(data.Dataset):
 
                 processed_dataset.append(structs)
 
-            processed_data = h5py.File(self.processed_file, "w")
+            processed_data = HDF5FileWrapper(self.processed_file, "w")
             HDF5Dataset.write_hdf5(processed_data, processed_dataset)
 
     def len(self) -> int:
