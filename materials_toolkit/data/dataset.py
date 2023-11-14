@@ -1,4 +1,3 @@
-from unittest import result
 import torch
 import torch.nn.functional as F
 from torch_geometric import data
@@ -18,6 +17,52 @@ from .data import StructureData
 
 def preprocess_jobs():
     pass
+
+
+class Selector(h5py.Dataset):
+    def __init__(self, dataset: h5py.Dataset, tensor: Optional[torch.Tensor] = None):
+        self._dataset = dataset
+        self._tensor = tensor
+
+    def __getattr__(self, name: str) -> Any:
+        if name in ("_dataset", "_tensor"):
+            return super(Selector, self).__getattr__(name)
+
+        return getattr(self._dataset, name)
+
+    def __setattr__(self, name: str, value: Any):
+        if name in ("_dataset", "_tensor"):
+            return super(Selector, self).__setattr__(name, value)
+
+        return setattr(self._dataset, name, value)
+
+    def __getitem__(
+        self, indices: Union[None, int, slice, torch.LongTensor, List, Tuple]
+    ) -> torch.Tensor:
+        if self._tensor is None:
+            if isinstance(indices, torch.Tensor):
+                indices = indices.numpy()
+            return torch.from_numpy(self._dataset[indices])
+        else:
+            return self._tensor[indices]
+
+    def __setitem__(
+        self,
+        indices: Union[None, int, slice, torch.LongTensor, List, Tuple],
+        tensor: Union[np.ndarray, torch.Tensor],
+    ):
+        if isinstance(indices, torch.Tensor):
+            indices = indices.numpy()
+
+        if isinstance(tensor, torch.Tensor):
+            tensor = tensor.numpy()
+
+        self._dataset[indices] = tensor
+
+        if self._tensor is not None:
+            if isinstance(tensor, np.ndarray):
+                tensor = torch.from_numpy(tensor)
+            self._dataset[indices] = tensor
 
 
 class HDF5FileWrapper(h5py.File):
@@ -51,19 +96,8 @@ class HDF5FileWrapper(h5py.File):
     def is_loaded(self) -> bool:
         return self.local is not None
 
-    def __getitem__(self, key: str) -> torch.Tensor:
-        if self.local is None:
-            return torch.from_numpy(super().__getitem__(key))
-        else:
-            return self.local[key]
-
-    def __setitem__(self, key: str, tensor: Union[np.ndarray, torch.Tensor]):
-        self.local = None
-
-        if isinstance(tensor, torch.Tensor):
-            tensor = tensor.numpy()
-
-        return super().__setitem__(key, tensor)
+    def __getitem__(self, key: str) -> Selector:
+        return Selector(super().__getitem__(key), self.local)
 
 
 class HDF5Dataset(data.Dataset):
@@ -304,6 +338,12 @@ class HDF5Dataset(data.Dataset):
 
 
 if __name__ == "__main__":
+    x = HDF5FileWrapper("data/mp/raw/data.hdf5", "r", load=True)
+
+    print(x["structures/atoms_ptr"])
+
+    exit(0)
+
     dataset = HDF5Dataset(
         root="./data/mp",
         url="https://huggingface.co/datasets/materials-toolkits/materials-project/resolve/main/materials-project.tar.gz",
