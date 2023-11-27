@@ -32,7 +32,7 @@ class ProgressIO(io.FileIO):
 def uncompress_progress(
     file: str,
     member: str,
-    path: Optional[str] = "./",
+    path: Optional[str] = "",
     **kwargs,
 ):
     if tarfile.is_tarfile(file):

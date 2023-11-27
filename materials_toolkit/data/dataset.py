@@ -1,8 +1,9 @@
+from __future__ import annotations
+
 import torch
 import torch.nn.functional as F
 from torch_geometric import data
 from torch_geometric.data.collate import collate
-from torch_geometric.data.separate import separate
 import h5py
 import numpy as np
 from tqdm import tqdm
@@ -10,15 +11,12 @@ from tqdm import tqdm
 from typing import List, Tuple, Any, Optional, Union, Callable, Dict
 import urllib.request
 import os
+import json
 import hashlib
 import shutil
 
 from .utils import uncompress_progress, download_progress, get_filename
-from .base import StructureData
-
-
-def preprocess_jobs():
-    pass
+from .base import StructureData, BatchingEncoder
 
 
 class Selector(h5py.Dataset):
@@ -44,7 +42,12 @@ class Selector(h5py.Dataset):
         if self._tensor is None:
             if isinstance(indices, torch.Tensor):
                 indices = indices.numpy()
-            return torch.from_numpy(self._dataset[indices])
+
+            d = self._dataset[indices]
+            if isinstance(d, np.ndarray):
+                return torch.from_numpy(d)
+
+            return torch.tensor([d])
         else:
             return self._tensor[indices]
 
@@ -65,6 +68,37 @@ class Selector(h5py.Dataset):
         return f"{self.__class__.__name__}({super().__repr__()})"
 
 
+class HDF5GroupWrapper(h5py.Group):
+    def __init__(self, id: Any, local: Optional[Dict[str, Union[Dict, torch.Tensor]]]):
+        super().__init__(id)
+
+        self.local = local
+
+    def shape(self, key: str) -> tuple:
+        return self.group[key].shape
+
+    def __getitem__(self, key: str) -> Union[h5py.Group, Selector]:
+        item = super().__getitem__(key)
+
+        if isinstance(item, h5py.Dataset):
+            item = Selector(
+                item,
+                None if self.local is None else self.local[key],
+            )
+        elif isinstance(item, h5py.Group):
+            item = HDF5GroupWrapper(
+                item.id,
+                None
+                if (self.local is None) or (key not in self.local)
+                else self.local[key],
+            )
+
+        return item
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({super().__repr__()})"
+
+
 class HDF5FileWrapper(h5py.File):
     def __init__(self, *args, load: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
@@ -75,15 +109,14 @@ class HDF5FileWrapper(h5py.File):
             self.load()
 
     @staticmethod
-    def load_dataset(dataset: h5py.Group) -> Dict[str, torch.Tensor]:
+    def load_dataset(dataset: h5py.Group) -> Dict[str, Union[Dict, torch.Tensor]]:
         result = {}
         for key, value in dataset.items():
             if isinstance(value, h5py.Group):
                 inner_dict = HDF5FileWrapper.load_dataset(value)
-                for inner_key, inner_value in inner_dict.items():
-                    result[os.path.join(key, inner_key)] = inner_value
+                result[key] = inner_dict
             else:
-                result[key] = torch.from_numpy(value[:])
+                result[key] = value[:]
 
         return result
 
@@ -96,19 +129,28 @@ class HDF5FileWrapper(h5py.File):
     def is_loaded(self) -> bool:
         return self.local is not None
 
-    def __getitem__(self, key: str) -> Selector:
+    def __getitem__(self, key: str) -> Union[h5py.Group, Selector]:
         item = super().__getitem__(key)
 
         if isinstance(item, h5py.Dataset):
             item = Selector(
-                super().__getitem__(key),
+                item,
                 None if self.local is None else self.local[key],
+            )
+        elif isinstance(item, h5py.Group):
+            item = HDF5GroupWrapper(
+                item.id,
+                None
+                if (self.local is None) or (key not in self.local)
+                else self.local[key],
             )
 
         return item
 
 
 class HDF5Dataset(data.Dataset):
+    data_class = StructureData
+
     def __init__(
         self,
         root: Optional[str] = None,
@@ -130,7 +172,6 @@ class HDF5Dataset(data.Dataset):
         data_file: Optional[str] = "data.hdf5",
         scalars_keys: Optional[List[str]] = [],
         compressed_file: Optional[str] = None,
-        workers: Optional[int] = None,
         in_memory: Optional[bool] = False,
         **kwargs,
     ):
@@ -151,8 +192,6 @@ class HDF5Dataset(data.Dataset):
         self.in_memory = in_memory
 
         self.scalars_keys = scalars_keys
-
-        self.workers = workers
 
         super().__init__(
             root=root,
@@ -214,96 +253,70 @@ class HDF5Dataset(data.Dataset):
             )
 
     @staticmethod
-    def index_from_ptr(
-        idx: torch.LongTensor,
-        ptr: torch.LongTensor,
-    ) -> torch.LongTensor:
-        length = ptr.index_select(0, idx + 1) - ptr.index_select(0, idx)
-        ptr = ptr.index_select(0, idx)
-
-        batched_idx = torch.arange(0, length.sum().item())
-        offset_idx = ptr - F.pad(length[:-1].cumsum(0), (1, 0))
-
-        atoms_idx = batched_idx + offset_idx.repeat_interleave(length)
-
-        return atoms_idx
-
-    @staticmethod
     def length_hdf5(file: HDF5FileWrapper) -> int:
-        return file["structures/natoms"].shape[0]
+        return file["data"]["periodic"].shape[0]
 
-    @staticmethod
-    def read_hdf5(
-        file: HDF5FileWrapper,
-        idx: Union[int, np.ndarray, torch.LongTensor],
-        scalars_keys: Optional[List[str]] = [],
-    ) -> Union[StructureData, List[StructureData]]:
-        single_strutcure = False
-        if isinstance(idx, int) or idx.ndim == 0:
-            single_strutcure = True
-            idx = torch.tensor([idx], dtype=torch.long)
-        elif isinstance(idx, np.ndarray):
-            idx = torch.from_numpy(idx).long()
-        elif isinstance(idx, torch.LongTensor):
-            if idx.ndim == 0:
-                idx = idx.reshape(1)
+    @classmethod
+    def read_hdf5(cls, file: HDF5FileWrapper, idx: int) -> StructureData:
+        cls_data = cls.data_class
 
-        atoms_ptr = file["structures/atoms_ptr"][:]
+        group_data = file["data"]
+        group_slice = file["slice"]
+        group_inc = file["inc"]
 
-        atoms_idx = HDF5Dataset.index_from_ptr(idx, atoms_ptr)
+        data_dict = {}
+        for key in group_data.keys():
+            if key in group_slice:
+                start = group_slice[key][idx]
+                end = group_slice[key][idx + 1]
+            else:
+                size = cls_data.batching[key].size
+                assert isinstance(size, int)
+                start, end = size * idx, size * (idx + 1)
 
-        if "structures/cell" in file:
-            cell = file["structures/cell"][idx]
-            periodic = cell.det().abs() > 1e-3
-        else:
-            cell = None
-            periodic = torch.full_like(idx, False, dtype=torch.bool)
+            if key in group_inc:
+                inc = group_inc[key][idx]
+            else:
+                inc = cls_data.batching[key].inc
+                assert isinstance(inc, int)
 
-        x = file["atoms/positions"][atoms_idx]
-        z = file["atoms/atomic_number"][atoms_idx]
-        scalars = {
-            key: file[os.path.join("structures", key)][idx] for key in scalars_keys
-        }
+            data_key = group_data[key][start:end]
+            if inc != 0 and data_key.dtype != torch.bool:
+                data_key -= inc
 
-        if single_strutcure:
-            return StructureData(cell=cell, x=x, z=z, periodic=periodic, **scalars)
+            data_dict[key] = data_key
 
-        structs = []
-        for i, current_idx in enumerate(idx):
-            structs.append(
-                StructureData(
-                    cell=cell[i],
-                    x=x[atoms_idx == current_idx],
-                    z=z[atoms_idx == current_idx],
-                    periodic=periodic[i],
-                    **scalars,
-                )
-            )
-        return structs
+        return cls.data_class(**data_dict)
+
+    @classmethod
+    def create_dataset(cls, path: str, structures: List[StructureData]):
+        with open(os.path.join(path, "batching.json"), "w") as fp:
+            json.dump(structures[0].batching, fp, cls=BatchingEncoder)
+
+        cls.write_hdf5(
+            HDF5FileWrapper(os.path.join(path, "data.hdf5"), "w"), structures
+        )
 
     @staticmethod
     def write_hdf5(file: HDF5FileWrapper, structures: List[StructureData]):
-        # structures = data.Batch.from_data_list(structures)
+        cls = type(structures[0])
+        batched, slice_dict, inc_dict = collate(cls, data_list=structures)
 
-        batch, slice_dict, inc_dict = collate(
-            StructureData, data_list=structures, increment=True, add_batch=False
-        )
+        keys = list(filter(lambda key: key in structures[0], cls.batching.keys()))
 
-        print(batch, slice_dict, inc_dict)
+        group_data = file.create_group("data")
+        for key in keys:
+            group_data.create_dataset(key, data=batched[key].numpy())
 
-        print(
-            separate(
-                cls=StructureData,
-                batch=batch,
-                idx=0,
-                slice_dict=slice_dict,
-                inc_dict=inc_dict,
-                decrement=True,
-            )
-        )
+        group_slice = file.create_group("slice")
+        for key in keys:
+            if isinstance(cls.batching[key].size, str):
+                group_slice.create_dataset(key, data=slice_dict[key].numpy())
 
-        for key, tensor in structures.to_dict().items():
-            file.create_dataset(key, data=tensor.numpy())
+        group_inc = file.create_group("inc")
+        for key in keys:
+            if isinstance(cls.batching[key].inc, str):
+                group_inc.create_dataset(key, data=inc_dict[key].numpy())
 
     def process(self):
         preprocessing = (self.pre_transform is not None) or (
@@ -314,7 +327,7 @@ class HDF5Dataset(data.Dataset):
         if not os.path.exists(os.path.join(dst, self.data_file)):
             uncompress_progress(
                 self.downloaded_file,
-                os.path.join(".", self.data_file),
+                self.data_file,
                 dst,
                 desc=f"unpack {self.compressed_file}",
             )
@@ -323,12 +336,12 @@ class HDF5Dataset(data.Dataset):
             raw_data = HDF5FileWrapper(self.raw_file, "r")
 
             processed_dataset = []
-            length = HDF5Dataset.length_hdf5(raw_data)
+            length = self.length_hdf5(raw_data)
             length = 16
             idx = torch.arange(length)
 
             for index in tqdm(idx, desc="preprocessing", unit="structure", leave=False):
-                structs = HDF5Dataset.read_hdf5(raw_data, index, self.scalars_keys)
+                structs = self.read_hdf5(raw_data, index, self.scalars_keys)
 
                 if self.pre_filter is not None:
                     if not self.pre_filter(structs):
@@ -341,21 +354,31 @@ class HDF5Dataset(data.Dataset):
 
             processed_data = HDF5FileWrapper(self.processed_file, "w")
             print(processed_data)
-            HDF5Dataset.write_hdf5(processed_data, processed_dataset)
+            self.write_hdf5(processed_data, processed_dataset)
 
     def len(self) -> int:
         r"""Returns the number of data objects stored in the dataset."""
-        return HDF5Dataset.length_hdf5(self.data_hdf5)
+        return self.length_hdf5(self.data_hdf5)
 
     def get(self, idx: int) -> StructureData:
         r"""Gets the data object at index :obj:`idx`."""
-        return HDF5Dataset.read_hdf5(self.data_hdf5, idx, self.scalars_keys)
+        return self.read_hdf5(self.data_hdf5, idx)
 
     def close(self):
         self.data_hdf5.close()
 
 
 def main():
+    from .datasets import MaterialsProject
+
+    dataset = MaterialsProject.read_hdf5(
+        HDF5FileWrapper("materials-project/data.hdf5", "r"), 2
+    )
+    print(dataset)
+
+    # HDF5Dataset.write_hdf5(HDF5FileWrapper("data.hdf5", "w"), dataset)
+
+    exit(0)
     dataset = HDF5Dataset(
         root="./data/mp",
         url="https://huggingface.co/datasets/materials-toolkits/materials-project/resolve/main/materials-project.tar.gz",

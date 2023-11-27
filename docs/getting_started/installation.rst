@@ -8,6 +8,15 @@
 Installation
 ############
 
+With pip
+********
+
+The materials-toolkits python packages can be install as follows:
+
+.. code-block:: bash
+
+    pip install materials-toolkits
+
 Virtual environement (optional)
 *******************************
 
@@ -17,6 +26,7 @@ Create a virtual environment and activate it:
 
     python -m venv ./venv_path
     source ./venv_path/bin/activate
+    pip install materials-toolkits
 
 Torch, PyG and CUDA (optional)
 ******************************
@@ -35,16 +45,10 @@ Installation of Torch and PyG with a specific cuda version (can be cpu):
     pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.0.0+$CUDA_VERSION.html
 
 
-Materials toolkit
-*****************
+Lastest version
+***************
 
-Install stable version:
-
-.. code-block:: bash
-
-    pip install materials-toolkits
-
-Install lastest version:
+To install the lastest version:
 
 .. code-block:: bash
 

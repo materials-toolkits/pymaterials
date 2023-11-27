@@ -1,26 +1,28 @@
-.. Materials toolkit documentation master file, created by
-   sphinx-quickstart on Fri Sep 29 17:35:30 2023.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
-
 Welcome to Materials toolkit's documentation!
 =============================================
 
-Github repo: https://github.com/materials-toolkits/pymaterials
+`[github] <https://github.com/materials-toolkits/pymaterials>`_
 
-.. raw:: html
-   :file: _static/images/coverage.svg
+.. automodule:: materials_toolkit
 
 .. toctree::
-   :maxdepth: 2
-   :titlesonly:
+   :maxdepth: 1
    :caption: Getting started!
 
    getting_started/installation
 
-Indices and tables
-==================
+.. toctree::
+   :glob:
+   :reversed:
+   :maxdepth: 1
+   :caption: Materials Toolkits modules
 
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+   api/data
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Development Guide
+
+   dev/overview
+   dev/documentation
+   dev/unittest

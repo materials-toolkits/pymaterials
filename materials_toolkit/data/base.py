@@ -1,103 +1,230 @@
 import torch
 from torch_geometric.data import Data
-from torch_geometric import loader
+import numpy as np
 
-from typing import Any, Optional, Union, Dict
+import json
+import typing
+from typing import Any, Optional, Union, Dict, Callable
+from dataclasses import dataclass
+
+class BatchingEncoder(json.JSONEncoder):
+
+    def default(self, obj):
+        if isinstance(obj, Batching):
+            return {
+                "cat_dim":obj.cat_dim,
+                "inc":obj.inc,
+                "size":obj.size,
+                "dtype":obj.dtype,
+                "default":obj.default
+            }
+        elif isinstance(obj, torch.dtype):
+            return str(obj)
+        
+        return json.JSONEncoder.default(self, obj)
 
 
-def batching(config: Dict[str, Any]):
+@dataclass(frozen=True)
+class Batching:
+    cat_dim: int = 0
+    inc: int | str = 0
+    size: int | str = 1
+    dtype: torch.dtype = torch.float32
+    default: Any = None
+
+    def __post_init__(self):
+        for var_name, var_type in typing.get_type_hints(self).items():
+            if var_type == Any:
+                continue
+
+            assert isinstance(
+                self.__getitem__(var_name), var_type
+            ), f'Fields "{var_name}" of the "{self.__class__.__name__}" class must be of type "{var_type}".'
+
+    def __getitem__(self, name: str) -> Any:
+        if name in ["cat_dim", "inc", "size", "default", "dtype"]:
+            return self.__getattribute__(name)
+        else:
+            raise KeyError
+        
+def batching(config: Dict[str, Batching]) -> Callable[[type], type]:
     assert isinstance(config, dict)
     for key, value in config.items():
-        assert isinstance(key, str) and isinstance(value, dict)
-        assert "cat_dim" in value and "inc" in value
-        assert isinstance(value["cat_dim"], int)
-        assert value["inc"] == 0 or (
-            isinstance(value["inc"], str)
-            and (value["inc"] in config or value["inc"] in StructureData.batching)
-        )
+        assert isinstance(key, str) and isinstance(value, Batching)
 
     def fn(cls):
         assert StructureData in cls.__bases__
+        cls.batching = cls.batching.copy()
         cls.batching.update(config)
+
+        return cls
 
     return fn
 
 
 class StructureData(Data):
-    batching = {
-        "pos": {"cat_dim": 0, "inc": "num_nodes"},
-        "z": {"cat_dim": 0, "inc": "num_nodes"},
-        "cell": {"cat_dim": 0, "inc": 0},
-        "y": {"cat_dim": 0, "inc": 0},
-        "num_nodes": {"cat_dim": 0, "inc": 0},
-        "periodic": {"cat_dim": 0, "inc": 0},
-        "edge_index": {"cat_dim": 1, "inc": "num_nodes"},
-        "edge_cell": {"cat_dim": 0, "inc": 0},
-        "num_edges": {"cat_dim": 0, "inc": 0},
-        "triplet_index": {"cat_dim": 1, "inc": "num_edges"},
-        "num_triplets": {"cat_dim": 0, "inc": 0},
-        "quadruplets_index": {"cat_dim": 1, "inc": "num_edges"},
-        "num_quadruplets": {"cat_dim": 0, "inc": 0},
+    """
+    
+    
+    Extended description of function.
+
+    Parameters
+    ----------
+    z : torch.LongTensor
+        Description of z
+    pos : Optional[torch.FloatTensor]
+        Description of pos
+    """
+
+    batching: Dict[str, Batching] = {
+        "pos": Batching(size="num_atoms"),
+        "z": Batching(size="num_atoms", dtype=torch.long),
+        "cell": Batching(),
+        "y": Batching(),
+        "num_atoms": Batching(default=0, dtype=torch.long),
+        "batch_atoms": Batching(inc=1, size="num_atoms", default=0, dtype=torch.long),
+        "periodic": Batching(dtype=torch.bool),
+        "edge_index": Batching(
+            cat_dim=1, inc="num_atoms", size="num_edges", dtype=torch.long
+        ),
+        "edge_cell": Batching(cat_dim=0, inc=0, size="num_edges", dtype=torch.long),
+        "num_edges": Batching(default=0, dtype=torch.long),
+        "batch_edges": Batching(inc=1, size="num_edges", default=0, dtype=torch.long),
+        "triplet_index": Batching(
+            cat_dim=1, inc="num_edges", size="num_triplets", dtype=torch.long
+        ),
+        "num_triplets": Batching(dtype=torch.long),
+        "batch_triplets": Batching(inc=1, size="num_triplets", dtype=torch.long),
+        "quadruplets_index": Batching(
+            cat_dim=1, inc="num_edges", size="num_quadruplets", dtype=torch.long
+        ),
+        "num_quadruplets": Batching(dtype=torch.long),
+        "batch_quadruplets": Batching(inc=1, size="num_quadruplets", dtype=torch.long),
     }
 
     def __init__(
         self,
-        pos: Optional[torch.FloatTensor] = None,
         z: Optional[torch.LongTensor] = None,
+        pos: Optional[torch.FloatTensor] = None,
         cell: Optional[torch.FloatTensor] = None,
         y: Optional[torch.FloatTensor] = None,
         edge_index: Optional[torch.LongTensor] = None,
         edge_cell: Optional[torch.LongTensor] = None,
         triplet_index: Optional[torch.LongTensor] = None,
         quadruplets_index: Optional[torch.LongTensor] = None,
-        periodic: Optional[Union[bool, torch.BoolTensor]] = False,
+        periodic: Optional[Union[bool, torch.BoolTensor]] = None,
         **kwargs,
     ):
-        if isinstance(periodic, bool):
-            periodic = torch.tensor(periodic)
+        
+        periodic = self._default_periodic(periodic, cell)
 
-        if "num_nodes" not in kwargs:
-            if pos is not None:
-                kwargs["num_nodes"] = pos.shape[self.batching["pos"]["cat_dim"]]
-            elif z is not None:
-                kwargs["num_nodes"] = z.shape[self.batching["z"]["cat_dim"]]
-        else:
-            kwargs["num_nodes"] = 0
-        if "num_edges" not in kwargs and edge_index is not None:
-            kwargs["num_edges"] = edge_index.shape[
-                self.batching["edge_index"]["cat_dim"]
-            ]
-        else:
-            kwargs["num_edges"] = 0
-        if "num_triplets" not in kwargs and triplet_index is not None:
-            kwargs["num_triplets"] = triplet_index.shape[
-                self.batching["triplet_index"]["cat_dim"]
-            ]
-        if "num_quadruplets" not in kwargs and quadruplets_index is not None:
-            kwargs["num_quadruplets"] = quadruplets_index.shape[
-                self.batching["quadruplets_index"]["cat_dim"]
-            ]
-
-        super().__init__(
+        self._merge_kwargs(
+            kwargs,
             pos=pos,
+            z=z,
             cell=cell,
             y=y,
-            z=z,
-            periodic=periodic,
             edge_index=edge_index,
             edge_cell=edge_cell,
             triplet_index=triplet_index,
             quadruplets_index=quadruplets_index,
-            **kwargs,
+            periodic=periodic,
         )
+
+        self._to_tensor(kwargs)
+
+        self._auto_fill(kwargs)
+
+        super().__init__(**kwargs)
+
+    @classmethod
+    def _merge_kwargs(
+        cls,
+        kwargs: Dict[str, Any],
+        pos: torch.FloatTensor,
+        z: torch.LongTensor,
+        cell: torch.FloatTensor,
+        y: torch.FloatTensor,
+        edge_index: torch.LongTensor,
+        edge_cell: torch.LongTensor,
+        triplet_index: torch.LongTensor,
+        quadruplets_index: torch.LongTensor,
+        periodic: Union[bool, torch.BoolTensor],
+    ):
+        kwargs["pos"] = pos
+        kwargs["z"] = z
+        kwargs["cell"] = cell
+        kwargs["y"] = y
+        kwargs["edge_index"] = edge_index
+        kwargs["edge_cell"] = edge_cell
+        kwargs["triplet_index"] = triplet_index
+        kwargs["quadruplets_index"] = quadruplets_index
+        kwargs["periodic"] = periodic
+
+    @classmethod
+    def _to_tensor(cls, kwargs: Dict[str, Any]):
+        for name, value in kwargs.items():
+            if value is None:
+                continue
+
+            if isinstance(value, np.ndarray):
+                kwargs[name] = torch.from_numpy(value)
+            elif not isinstance(value, torch.Tensor):
+                kwargs[name] = torch.tensor(value)
+
+    @classmethod
+    def _auto_fill(cls, kwargs: Dict[str, Any]) -> bool:
+        for name, batching in cls.batching.items():
+            if (name in kwargs) and (kwargs[name] is not None):
+                continue
+
+            from_key = next(
+                filter(
+                    lambda x: (kwargs[x] is not None)
+                    and (cls.batching[x].size == name),
+                    kwargs.keys(),
+                ),
+                None,
+            )
+
+            if from_key is not None:
+                kwargs[name] = torch.tensor(
+                    [kwargs[from_key].shape[batching.cat_dim]], dtype=batching.dtype
+                )
+
+        for name, batching in cls.batching.items():
+            if (name in kwargs) and (kwargs[name] is not None):
+                continue
+
+            if batching.default is None:
+                continue
+
+            size = batching.size
+            if isinstance(size, str) and (size in kwargs):
+                size = kwargs[size].item()
+
+            kwargs[name] = torch.full(
+                (size,), fill_value=batching.default, dtype=batching.dtype
+            )
+
+    @classmethod
+    def _default_periodic(
+        cls,
+        periodic: Union[bool, torch.BoolTensor] = None,
+        cell: torch.FloatTensor = None,
+    ) -> torch.BoolTensor:
+        if periodic is None:
+            periodic = cell is not None
+
+        if isinstance(periodic, bool):
+            periodic = torch.tensor(periodic)
+
+        return periodic.flatten()
 
     def __cat_dim__(self, key: str, value: Any, *args, **kwargs) -> int:
         inc = self.batching.get(key, {"cat_dim": 0})["cat_dim"]
 
         return inc
-
-    def has_inc(self, key: str) -> bool:
-        return self.batching.get(key, {"inc": 0})["inc"] != 0
 
     def __inc__(self, key: str, value: Any, *args, **kwargs) -> int:
         inc = self.batching.get(key, {"inc": 0})["inc"]
@@ -110,42 +237,3 @@ class StructureData(Data):
             inc = inc.item()
 
         return inc
-
-
-from torch_geometric.data import InMemoryDataset
-
-
-class TestDataset(InMemoryDataset):
-    def len(self) -> int:
-        return 10
-
-    def get(self, idx: int) -> StructureData:
-        torch.manual_seed(idx)
-        nodes = torch.randint(4, 8, (1,)).item()
-        edges = torch.randint(4, 2 * nodes, (1,)).item()
-        triplets = torch.randint(4, 2 * edges, (1,)).item()
-        return StructureData(
-            x=torch.randn((nodes, 64)),
-            cell=torch.matrix_exp(0.1 * torch.randn(1, 3, 3)),
-            natoms=torch.tensor(nodes),
-            nedges=torch.tensor(edges),
-            ntriplets=torch.tensor(triplets),
-            edge_index=torch.randint(0, nodes - 1, (2, edges)),
-            triplet_index=torch.randint(0, edges - 1, (2, triplets)),
-            y=torch.tensor([[nodes, edges, triplets]]),
-        )
-
-
-if __name__ == "__main__":
-    batch_size = 4
-    dataset = TestDataset()
-    loader = loader.DataLoader(dataset, batch_size=batch_size)
-
-    for batch in loader:
-        break
-
-    for idx in range(batch_size):
-        assert (dataset[idx].edge_index == batch.get_example(idx).edge_index).all()
-        assert (
-            dataset[idx].triplet_index == batch.get_example(idx).triplet_index
-        ).all()
