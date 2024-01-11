@@ -13,11 +13,29 @@ author = "Astrid Klipfel"
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-extensions = ["myst_parser", "sphinx_copybutton", "sphinx.ext.doctest","sphinx.ext.autosectionlabel", 'sphinx.ext.autodoc', 'sphinx.ext.napoleon']
+extensions = [
+    "myst_parser",
+    "sphinx_copybutton",
+    "sphinx.ext.doctest",
+    "sphinx.ext.autosectionlabel",
+    "sphinx.ext.autodoc",
+    "sphinx.ext.napoleon",
+]
 
 napoleon_numpy_docstring = True
 napoleon_include_init_with_doc = True
 napoleon_preprocess_types = True
+
+copybutton_exclude = ".linenos, .gp, .go"
+
+doctest_global_setup = """
+#if required, modif sys.path:
+import sys
+sys.path.append('../pymaterials/')
+from pymaterials import *
+from pymaterials.data import *
+"""
+
 
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
@@ -28,5 +46,6 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"]
 
-import os,sys
-sys.path.insert(0, os.path.abspath('.'))
+import os, sys
+
+sys.path.insert(0, os.path.abspath("."))

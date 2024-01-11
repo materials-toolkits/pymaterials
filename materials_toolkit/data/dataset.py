@@ -9,11 +9,9 @@ import numpy as np
 from tqdm import tqdm
 
 from typing import List, Tuple, Any, Optional, Union, Callable, Dict
-import urllib.request
 import os
 import json
 import hashlib
-import shutil
 
 from .utils import uncompress_progress, download_progress, get_filename
 from .base import StructureData, BatchingEncoder
@@ -35,6 +33,18 @@ class Selector(h5py.Dataset):
             return super(Selector, self).__setattr__(name, value)
 
         return setattr(self._dataset, name, value)
+
+    def select_slice(self, dim: int, start: int, stop: int) -> torch.Tensor:
+        ndim = self._dataset.ndim
+
+        slices = tuple(
+            slice(None) if i != dim else slice(start, stop) for i in range(ndim)
+        )
+
+        if self._tensor is None:
+            return torch.from_numpy(self._dataset[slices])
+        else:
+            return self._tensor[slices]
 
     def __getitem__(
         self, indices: Union[None, int, slice, torch.LongTensor, List, Tuple]
@@ -267,20 +277,25 @@ class HDF5Dataset(data.Dataset):
         data_dict = {}
         for key in group_data.keys():
             if key in group_slice:
-                start = group_slice[key][idx]
-                end = group_slice[key][idx + 1]
+                start = group_slice[key][idx].item()
+                end = group_slice[key][idx + 1].item()
             else:
-                size = cls_data.batching[key].size
+                size = cls_data.batching[key].shape
+                if isinstance(size, tuple):
+                    size = size[cls_data.batching[key].cat_dim]
                 assert isinstance(size, int)
                 start, end = size * idx, size * (idx + 1)
 
             if key in group_inc:
                 inc = group_inc[key][idx]
             else:
-                inc = cls_data.batching[key].inc
+                inc = cls_data.batching[key].inc * idx
                 assert isinstance(inc, int)
 
-            data_key = group_data[key][start:end]
+            data_key = group_data[key].select_slice(
+                cls_data.batching[key].cat_dim, start, end
+            )
+
             if inc != 0 and data_key.dtype != torch.bool:
                 data_key -= inc
 
@@ -290,6 +305,8 @@ class HDF5Dataset(data.Dataset):
 
     @classmethod
     def create_dataset(cls, path: str, structures: List[StructureData]):
+        os.makedirs(path, exist_ok=True)
+
         with open(os.path.join(path, "batching.json"), "w") as fp:
             json.dump(structures[0].batching, fp, cls=BatchingEncoder)
 
@@ -310,7 +327,11 @@ class HDF5Dataset(data.Dataset):
 
         group_slice = file.create_group("slice")
         for key in keys:
-            if isinstance(cls.batching[key].size, str):
+            if isinstance(cls.batching[key].shape, str):
+                group_slice.create_dataset(key, data=slice_dict[key].numpy())
+            elif isinstance(cls.batching[key].shape, tuple) and any(
+                map(lambda x: isinstance(x, str), cls.batching[key].shape)
+            ):
                 group_slice.create_dataset(key, data=slice_dict[key].numpy())
 
         group_inc = file.create_group("inc")
@@ -366,36 +387,3 @@ class HDF5Dataset(data.Dataset):
 
     def close(self):
         self.data_hdf5.close()
-
-
-def main():
-    from .datasets import MaterialsProject
-
-    dataset = MaterialsProject.read_hdf5(
-        HDF5FileWrapper("materials-project/data.hdf5", "r"), 2
-    )
-    print(dataset)
-
-    # HDF5Dataset.write_hdf5(HDF5FileWrapper("data.hdf5", "w"), dataset)
-
-    exit(0)
-    dataset = HDF5Dataset(
-        root="./data/mp",
-        url="https://huggingface.co/datasets/materials-toolkits/materials-project/resolve/main/materials-project.tar.gz",
-        md5="03370e8fe6426f7fbe9494b11e215ee9",
-        pre_transform=lambda x: x,
-    )
-
-    N = 1024
-    length = torch.randint(4, 8, (N,))
-    ptr = F.pad(torch.cumsum(length, 0), (1, 0))
-    idx = torch.randperm(N)[:16]
-    print(length)
-    print(ptr)
-    print(idx)
-    print(length[idx])
-    print(dataset.index_from_ptr(idx, ptr))
-
-
-if __name__ == "__main__":
-    main()

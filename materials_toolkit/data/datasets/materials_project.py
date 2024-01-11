@@ -5,12 +5,7 @@ from ..base import StructureData, batching, Batching
 from ..dataset import HDF5Dataset
 
 
-@batching(
-    {
-        "material_id": Batching(dtype=torch.long),
-        "energy_pa": Batching(),
-    }
-)
+@batching(material_id=Batching(dtype=torch.long), energy_pa=Batching())
 class MaterialsProjectData(StructureData):
     pass
 
@@ -42,16 +37,3 @@ class MaterialsProject(HDF5Dataset):
             in_memory=in_memory,
             **kwargs
         )
-
-
-if __name__ == "__main__":
-    dataset = MaterialsProject("./data/mp")
-    print(dataset)
-
-    for i in range(10):
-        data1 = dataset[i]
-        print(data1.material_id)
-        print(data1.pos)
-        print(data1.z)
-        print(data1.cell)
-        print(data1.energy_pa)
