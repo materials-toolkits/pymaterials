@@ -288,9 +288,10 @@ class HDF5Dataset(data.Dataset):
 
             if key in group_inc:
                 inc = group_inc[key][idx]
-            else:
+            elif isinstance(cls_data.batching[key].inc, int):
                 inc = cls_data.batching[key].inc * idx
-                assert isinstance(inc, int)
+            else:
+                inc = None
 
             data_key = group_data[key].select_slice(
                 cls_data.batching[key].cat_dim, start, end
@@ -358,11 +359,11 @@ class HDF5Dataset(data.Dataset):
 
             processed_dataset = []
             length = self.length_hdf5(raw_data)
-            length = 16
+            length = 1 << 14
             idx = torch.arange(length)
 
             for index in tqdm(idx, desc="preprocessing", unit="structure", leave=False):
-                structs = self.read_hdf5(raw_data, index, self.scalars_keys)
+                structs = self.read_hdf5(raw_data, index)
 
                 if self.pre_filter is not None:
                     if not self.pre_filter(structs):
@@ -374,7 +375,6 @@ class HDF5Dataset(data.Dataset):
                 processed_dataset.append(structs)
 
             processed_data = HDF5FileWrapper(self.processed_file, "w")
-            print(processed_data)
             self.write_hdf5(processed_data, processed_dataset)
 
     def len(self) -> int:
