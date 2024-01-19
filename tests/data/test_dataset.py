@@ -24,15 +24,16 @@ def generate_data_list(count=128):
 
         pos = torch.rand(n, 3).float()
         z = torch.randint(1, 128, (n,)).long()
-        cell = torch.matrix_exp(torch.rand(1, 3, 3)).float()
         y = torch.randn(1, 7).float()
         periodic = torch.randint(0, 2, tuple()).bool().item()
 
         n_edges = torch.randint(4, 1024, tuple()).item()
         edge_index = torch.randint(0, n, (2, n_edges)).long()
         if periodic:
+            cell = torch.matrix_exp(torch.rand(1, 3, 3)).float()
             target_cell = torch.randint(-3, 4, (n_edges, 3)).long()
         else:
+            cell = None
             target_cell = None
 
         n_triplets = torch.randint(4, 1024, tuple()).item()
@@ -42,15 +43,15 @@ def generate_data_list(count=128):
         quadruplets_index = torch.randint(0, n_edges, (3, num_quadruplets)).long()
 
         struct = StructureData(
-            z,
-            pos,
-            cell,
-            y,
-            edge_index,
-            target_cell,
-            triplet_index,
-            quadruplets_index,
-            periodic,
+            z=z,
+            pos=pos,
+            cell=cell,
+            y=y,
+            edge_index=edge_index,
+            target_cell=target_cell,
+            triplet_index=triplet_index,
+            quadruplets_index=quadruplets_index,
+            periodic=periodic,
         )
         structures.append(struct)
 
@@ -169,6 +170,15 @@ def test_download_process(dataset_tmp_path):
             url="http://127.0.0.1:8000/test-data.tar.gz",
             md5=get_md5_hash(os.path.join(dataset_tmp_path, "test-data.tar.gz")),
         )
+
+    import h5py
+
+    print(dataset_tmp_path)
+    f = h5py.File(os.path.join(dataset_tmp_path, "test-data/data.hdf5"))
+    print(f["data"].keys())
+    print(f["data"]["cell"][:])
+    print(f["data"]["periodic"][:])
+    print(dataset[1])
 
     with open(os.path.join(dataset_tmp_path, "ground-truth.pickle"), "rb") as fp:
         ground_truth = pickle.load(fp)

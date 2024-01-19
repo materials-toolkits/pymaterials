@@ -267,12 +267,14 @@ class HDF5Dataset(data.Dataset):
         return file["data"]["periodic"].shape[0]
 
     @classmethod
-    def read_hdf5(cls, file: HDF5FileWrapper, idx: int) -> StructureData:
+    def _get_structure(
+        cls,
+        idx: int,
+        group_data: Dict[str, torch.Tensor],
+        group_slice: Dict[str, torch.Tensor],
+        group_inc: Dict[str, torch.Tensor],
+    ):
         cls_data = cls.data_class
-
-        group_data = file["data"]
-        group_slice = file["slice"]
-        group_inc = file["inc"]
 
         data_dict = {}
         for key in group_data.keys():
@@ -302,7 +304,16 @@ class HDF5Dataset(data.Dataset):
 
             data_dict[key] = data_key
 
+        print(data_dict)
         return cls.data_class(**data_dict)
+
+    @classmethod
+    def separate(cls, data: data.Batch) -> List[StructureData]:
+        data.to_data_list
+
+    @classmethod
+    def read_hdf5(cls, file: HDF5FileWrapper, idx: int) -> StructureData:
+        return cls._get_structure(idx, file["data"], file["slice"], file["inc"])
 
     @classmethod
     def create_dataset(cls, path: str, structures: List[StructureData]):

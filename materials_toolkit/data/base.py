@@ -125,15 +125,15 @@ class StructureData(torch_geometric.data.Data):
     ...                         [-0.7575408, 0.58707964, 0.0],
     ...                         [0.7575408, 0.58707964, 0.0]])
     ... )
-    StructureData(pos=[3, 3], z=[3], target_cell=[0, 3], periodic=[1], num_atoms=[1], batch_atoms=[3], num_edges=[1], batch_edges=[0])
+    StructureData(pos=[3, 3], z=[3], periodic=[1], num_atoms=[1], batch_atoms=[3], num_edges=[1], batch_edges=[0])
 
-    * Water molecule with bonds
+    * Water molecule with bondsd
 
     >>> StructureData(
     ...     z = torch.tensor([8, 1, 1],dtype=torch.long),
     ...     edge_index = torch.tensor([[0, 0], [1, 2]],dtype=torch.long)
     ... )
-    StructureData(edge_index=[2, 2], z=[3], target_cell=[2, 3], periodic=[1], num_atoms=[1], batch_atoms=[3], num_edges=[1], batch_edges=[2])
+    StructureData(edge_index=[2, 2], z=[3], periodic=[1], num_atoms=[1], batch_atoms=[3], num_edges=[1], batch_edges=[2])
 
     * Peroveskite in 3D
 
@@ -148,7 +148,7 @@ class StructureData(torch_geometric.data.Data):
     ...                           [0.0, 3.867, 0.0],
     ...                           [0.0, 0.0, 3.867]]])
     ... )
-    StructureData(pos=[5, 3], z=[5], cell=[1, 3, 3], target_cell=[0, 3], periodic=[1], num_atoms=[1], batch_atoms=[5], num_edges=[1], batch_edges=[0])
+    StructureData(pos=[5, 3], z=[5], cell=[1, 3, 3], periodic=[1], num_atoms=[1], batch_atoms=[5], num_edges=[1], batch_edges=[0])
 
     * Crystal with an associated graph
 
@@ -212,7 +212,7 @@ class StructureData(torch_geometric.data.Data):
             cat_dim=1, inc="num_atoms", shape=(2, "num_edges"), dtype=torch.long
         ),
         "target_cell": Batching(
-            cat_dim=0, inc=0, shape=("num_edges", 3), dtype=torch.long, default=0
+            cat_dim=0, inc=0, shape=("num_edges", 3), dtype=torch.long
         ),
         "num_edges": Batching(default=0, dtype=torch.long),
         "batch_edges": Batching(inc=1, shape="num_edges", default=0, dtype=torch.long),
@@ -241,6 +241,14 @@ class StructureData(torch_geometric.data.Data):
         periodic: Optional[Union[bool, torch.BoolTensor]] = None,
         **kwargs,
     ):
+        """
+        assert (
+            (not periodic)
+            or (edge_index is None)
+            or (periodic and (edge_index is not None) and (target_cell is not None))
+        ), f"{periodic}, {cell}, {edge_index}, {target_cell}"
+        """
+
         periodic = self._default_periodic(periodic, cell)
 
         self._merge_kwargs(
@@ -261,6 +269,18 @@ class StructureData(torch_geometric.data.Data):
         self._auto_fill(kwargs)
 
         super().__init__(**kwargs)
+
+        """
+        assert (
+            (not self.periodic)
+            or (not hasattr(self._store, "edge_index"))
+            or (
+                self.periodic
+                and hasattr(self._store, "edge_index")
+                and hasattr(self._store, "target_cell")
+            )
+        ), f"{original}, {kwargs}"
+        """
 
     @classmethod
     def _merge_kwargs(
@@ -285,6 +305,20 @@ class StructureData(torch_geometric.data.Data):
         kwargs["triplet_index"] = triplet_index
         kwargs["quadruplets_index"] = quadruplets_index
         kwargs["periodic"] = periodic
+
+    @property
+    def target_cell(self) -> torch.LongTensor:
+        if hasattr(self._store, "target_cell"):
+            return getattr(self._store, "target_cell")
+
+        return torch.zeros((self.num_edges, 3), dtype=torch.long)
+
+    @property
+    def cell(self) -> torch.FloatTensor:
+        if hasattr(self._store, "cell"):
+            return getattr(self._store, "cell")
+
+        return torch.eye(3).unsqueeze(0).repeat(self.num_atoms.shape[0], 1, 1)
 
     @classmethod
     def _to_tensor(cls, kwargs: Dict[str, Any]):
@@ -388,6 +422,8 @@ class StructureData(torch_geometric.data.Data):
     ) -> torch.BoolTensor:
         if periodic is None:
             periodic = cell is not None
+
+        assert (not periodic) or (periodic and cell is not None)
 
         if isinstance(periodic, bool):
             periodic = torch.tensor(periodic)
