@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torch_geometric.data import Batch
+from torch_scatter import scatter_min, scatter_max
 
 from materials_toolkit.data import StructureData
 
@@ -16,7 +17,19 @@ class Filter(nn.Module, metaclass=ABCMeta):
 
 class SequentialFilter(nn.ModuleList, Filter):
     def forward(self, struct: StructureData) -> bool | torch.BoolTensor:
-        super().forward(struct)
+        if isinstance(struct, Batch):
+            for filter in self.modules():
+                mask = filter(struct)
+
+                assert isinstance(mask, torch.BoolTensor)
+
+                struct = struct.filter_apply(mask)
+
+        for filter in self.modules():
+            if not filter(struct):
+                return False
+
+        return True
 
 
 class FilterNumberOfAtoms(Filter):
@@ -65,12 +78,15 @@ class FilterAtoms(Filter):
         self.excluded_mask = nn.Parameter(excluded_mask, requires_grad=False)
 
     def forward(self, struct: StructureData) -> bool | torch.BoolTensor:
-        if isinstance(struct, Batch):
-            return (self.min <= struct.num_atoms) & (struct.num_atoms <= self.max)
+        included = self.included_mask[struct.z]
+        excluded = self.excluded_mask[struct.z]
 
-        return (self.included_mask[struct.z]).any() & (
-            ~self.excluded_mask[struct.z]
-        ).all()
+        if isinstance(struct, Batch):
+            return scatter_max(included, struct.batch_atoms) & (
+                scatter_min(~excluded, struct.batch_atoms)
+            )
+
+        return included.any() & (~excluded).all()
 
 
 class FilterNobleGas(FilterAtoms):

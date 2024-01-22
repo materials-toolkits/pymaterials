@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import torch
 import torch_geometric
 import numpy as np
@@ -6,6 +8,7 @@ import json
 import typing
 from typing import Any, Optional, Union, Dict, Callable, Tuple
 from dataclasses import dataclass
+import functools
 
 
 class BatchingEncoder(json.JSONEncoder):
@@ -72,9 +75,6 @@ class Batching:
             return self.__getattribute__(name)
         else:
             raise KeyError
-
-
-import functools
 
 
 def batching(**config: Dict[str, Batching]) -> Callable[[type], type]:
@@ -241,14 +241,6 @@ class StructureData(torch_geometric.data.Data):
         periodic: Optional[Union[bool, torch.BoolTensor]] = None,
         **kwargs,
     ):
-        """
-        assert (
-            (not periodic)
-            or (edge_index is None)
-            or (periodic and (edge_index is not None) and (target_cell is not None))
-        ), f"{periodic}, {cell}, {edge_index}, {target_cell}"
-        """
-
         periodic = self._default_periodic(periodic, cell)
 
         self._merge_kwargs(
@@ -270,17 +262,34 @@ class StructureData(torch_geometric.data.Data):
 
         super().__init__(**kwargs)
 
-        """
-        assert (
-            (not self.periodic)
-            or (not hasattr(self._store, "edge_index"))
-            or (
-                self.periodic
-                and hasattr(self._store, "edge_index")
-                and hasattr(self._store, "target_cell")
-            )
-        ), f"{original}, {kwargs}"
-        """
+    def filter_apply(self, mask: torch.BoolTensor) -> StructureData:
+        data = {}
+        masks = {}
+
+        for key in self.keys:
+            current: torch.Tensor = getattr(self._store, key)
+
+            shape = self.batching[key].shape
+            if isinstance(shape, str):
+                shape = (shape,)
+
+            if isinstance(shape, int):
+                data[key] = current
+                continue
+
+            current_mask = []
+            for s in shape:
+                if isinstance(s, str) and (s not in masks):
+                    num_elem = getattr(self._store, s)
+                    masks[s] = mask.repeat_interleave(num_elem)
+
+                current_mask.append(masks[s])
+
+            current = current[current_mask]
+
+            data[key] = current
+
+        return self.__class__(**data)
 
     @classmethod
     def _merge_kwargs(
