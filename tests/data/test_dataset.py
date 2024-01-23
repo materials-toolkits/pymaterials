@@ -40,7 +40,7 @@ def generate_data_list(count=128):
         triplet_index = torch.randint(0, n_edges, (2, n_triplets)).long()
 
         num_quadruplets = torch.randint(4, 1024, tuple()).item()
-        quadruplets_index = torch.randint(0, n_edges, (3, num_quadruplets)).long()
+        quadruplet_index = torch.randint(0, n_edges, (3, num_quadruplets)).long()
 
         struct = StructureData(
             z=z,
@@ -50,7 +50,7 @@ def generate_data_list(count=128):
             edge_index=edge_index,
             target_cell=target_cell,
             triplet_index=triplet_index,
-            quadruplets_index=quadruplets_index,
+            quadruplet_index=quadruplet_index,
             periodic=periodic,
         )
         structures.append(struct)
