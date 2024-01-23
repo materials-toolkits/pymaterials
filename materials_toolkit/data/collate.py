@@ -1,11 +1,10 @@
-from numpy import iterable
 import torch
 import torch.nn.functional as F
 
 from materials_toolkit.data import StructureData
 from materials_toolkit.data.base import Batching
 
-from typing import Iterable, List, Tuple, Dict, Mapping
+from typing import Iterable, List, Tuple, Dict, Mapping, Callable
 
 
 def get_indexing(
@@ -97,6 +96,46 @@ def collate(structures: List[StructureData]) -> StructureData:
     return cls(**data_args)
 
 
+def _get_indices(
+    idx: torch.LongTensor,
+    keys: Iterable[str],
+    batching: Dict[str, Batching],
+    indexing: Dict[str, torch.LongTensor],
+) -> Dict[str, torch.LongTensor]:
+    indices = {}
+    indices_storage = {}
+
+    for key in keys:
+        cat_index = batching[key].shape[batching[key].cat_dim]
+
+        if cat_index not in indices_storage:
+            if isinstance(cat_index, str):
+                size = indexing[cat_index][idx + 1] - indexing[cat_index][idx]
+
+                selected_idx = torch.arange(size.sum(), dtype=torch.long)
+                offset = F.pad(size[:-1].cumsum(0), (1, 0))
+
+                offset_neg = selected_idx[offset].repeat_interleave(size)
+                offset_pos = indexing[cat_index][idx].repeat_interleave(size)
+
+                selected_idx += offset_pos - offset_neg
+            else:
+                selected_idx = idx.repeat_interleave(cat_index)
+
+            indices_storage[cat_index] = selected_idx
+
+        indices[key] = indices_storage[cat_index]
+
+    return indices
+
+
+def _select_by_indices(
+    batch: Mapping[str, torch.Tensor],
+    indices: Dict[str, torch.LongTensor],
+) -> Dict[str, torch.Tensor]:
+    pass
+
+
 def separate(
     batch: Mapping[str, torch.Tensor],
     idx: int | torch.LongTensor = None,
@@ -107,14 +146,21 @@ def separate(
         assert hasattr(batch, "batching"), "Batching can't be inferred automatically."
         batching = batch.batching
 
-    if idx is None:
-        idx = torch.arange(batch["num_atoms"].shape[0])
-    elif isinstance(idx, int):
-        idx = torch.tensor([idx], dtype=torch.long)
-    assert isinstance(idx, torch.LongTensor), "idx must be None, int and LongTensor"
-
     if indexing is None:
         indexing = get_indexing(batch, batching)
 
-    print(batch["num_atoms"])
+    if isinstance(batch.keys, Callable):
+        keys = batch.keys()
+    else:
+        keys = batch.keys
+
+    if idx is not None:
+        if isinstance(idx, int):
+            idx = torch.tensor([idx], dtype=torch.long)
+        assert isinstance(idx, torch.LongTensor), "idx must be None, int or LongTensor"
+
+        indices = _get_indices(idx, keys, batching, indexing)
+
+    print(indices)
+
     return []

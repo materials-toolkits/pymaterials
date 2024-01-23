@@ -22,6 +22,7 @@ optional = true
 pytest = "*"
 pytest-httpserver = "1.0.7"
 pytest-timeout = "*"
+toml = "*"
 coverage = "*"
 coverage-badge = "*"
 
