@@ -1,4 +1,5 @@
 import torch
+from torch._tensor import Tensor
 import torch.nn.functional as F
 
 from materials_toolkit.data import StructureData
@@ -7,8 +8,21 @@ from materials_toolkit.data.base import Batching
 from typing import Iterable, List, Tuple, Dict, Mapping, Callable
 
 
+class SelectableTensor:
+    def __getitem__(self, args: int | torch.LongTensor | tuple) -> torch.Tensor:
+        pass
+
+    def index_select(self, dim: int, index: torch.LongTensor) -> torch.Tensor:
+        pass
+
+
+class SelectableTensorMaping(Mapping[str, SelectableTensor]):
+    def __getitem__(self, __key: str) -> SelectableTensor:
+        pass
+
+
 def get_indexing(
-    batch: Mapping[str, torch.Tensor],
+    batch: Mapping[str, SelectableTensor],
     batching: Dict[str, Batching] = None,
 ) -> Dict[str, torch.LongTensor]:
     if batching is None:
@@ -96,17 +110,19 @@ def collate(structures: List[StructureData]) -> StructureData:
     return cls(**data_args)
 
 
-def _get_indices(
+def _select_by_indices(
+    batch: SelectableTensorMaping,
     idx: torch.LongTensor,
     keys: Iterable[str],
     batching: Dict[str, Batching],
     indexing: Dict[str, torch.LongTensor],
 ) -> Dict[str, torch.LongTensor]:
-    indices = {}
-    indices_storage = {}
+    indices_storage = {}  # Use a single instance of each index to save memory.
+    result = {}
 
     for key in keys:
-        cat_index = batching[key].shape[batching[key].cat_dim]
+        cat_dim = batching[key].cat_dim
+        cat_index = batching[key].shape[cat_dim]
 
         if cat_index not in indices_storage:
             if isinstance(cat_index, str):
@@ -124,20 +140,32 @@ def _get_indices(
 
             indices_storage[cat_index] = selected_idx
 
-        indices[key] = indices_storage[cat_index]
+        result[key] = batch[key].index_select(cat_dim, indices_storage[cat_index])
 
-    return indices
+    return result
 
 
-def _select_by_indices(
-    batch: Mapping[str, torch.Tensor],
-    indices: Dict[str, torch.LongTensor],
-) -> Dict[str, torch.Tensor]:
-    pass
+def _decrement_in_place(
+    data: [str, torch.Tensor],
+    batching: Dict[str, Batching],
+    indexing: Dict[str, torch.LongTensor],
+) -> None:
+    for key, tensor in data.items():
+        inc = batching[key].inc
+        cat_dim = batching[key].cat_dim
+
+        if inc == 0:
+            continue
+        elif isinstance(inc, str):
+            inc_tensor = indexing[inc]
+        else:
+            inc_tensor = torch.arange(
+                0, inc * data.shape[cat_dim], inc, dtype=torch.LongTensor
+            )
 
 
 def separate(
-    batch: Mapping[str, torch.Tensor],
+    batch: SelectableTensorMaping,
     idx: int | torch.LongTensor = None,
     batching: Dict[str, Batching] = None,
     indexing: Dict[str, torch.LongTensor] = None,
@@ -159,8 +187,12 @@ def separate(
             idx = torch.tensor([idx], dtype=torch.long)
         assert isinstance(idx, torch.LongTensor), "idx must be None, int or LongTensor"
 
-        indices = _get_indices(idx, keys, batching, indexing)
+        data = _select_by_indices(batch, idx, keys, batching, indexing)
+    else:
+        data = {key: batch[key].clone() for key in keys}
 
-    print(indices)
+    _decrement_in_place(data, batching, indexing)
+
+    print(data)
 
     return []

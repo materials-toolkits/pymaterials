@@ -67,7 +67,7 @@ print(batch.edge_index)
 
 print(get_indexing(batch))
 
-print(separate(batch, idx=torch.arange(4, dtype=torch.long)))
+print(separate(batch, idx=torch.arange(1, 4, dtype=torch.long)))
 
 exit(0)
 import shutil
