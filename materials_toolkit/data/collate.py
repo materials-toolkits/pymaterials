@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from materials_toolkit.data import StructureData
 from materials_toolkit.data.base import Batching
 
-from typing import Iterable, List, Tuple, Dict, Mapping, Callable
+from typing import Iterable, List, Tuple, Dict, Mapping, Callable, Optional
 
 
 class SelectableTensor:
@@ -110,58 +110,108 @@ def collate(structures: List[StructureData]) -> StructureData:
     return cls(**data_args)
 
 
-def _select_by_indices(
-    batch: SelectableTensorMaping,
+def _select_indexing(
     idx: torch.LongTensor,
     keys: Iterable[str],
     batching: Dict[str, Batching],
     indexing: Dict[str, torch.LongTensor],
-) -> Dict[str, torch.LongTensor]:
-    indices_storage = {}  # Use a single instance of each index to save memory.
-    result = {}
-
+):
+    keys_indexing = set()
     for key in keys:
         cat_dim = batching[key].cat_dim
         cat_index = batching[key].shape[cat_dim]
 
-        if cat_index not in indices_storage:
-            if isinstance(cat_index, str):
-                size = indexing[cat_index][idx + 1] - indexing[cat_index][idx]
+        if isinstance(cat_index, str):
+            keys_indexing.add(cat_index)
 
-                selected_idx = torch.arange(size.sum(), dtype=torch.long)
-                offset = F.pad(size[:-1].cumsum(0), (1, 0))
+    select_indexing = {}
+    for cat_index in keys_indexing:
+        size = indexing[cat_index][idx + 1] - indexing[cat_index][idx]
 
-                offset_neg = selected_idx[offset].repeat_interleave(size)
-                offset_pos = indexing[cat_index][idx].repeat_interleave(size)
+        selected_idx = torch.arange(size.sum(), dtype=torch.long)
+        offset = F.pad(size[:-1].cumsum(0), (1, 0))
 
-                selected_idx += offset_pos - offset_neg
+        offset_idx = indexing[cat_index][idx] - selected_idx[offset]
+
+        selected_idx += offset_idx.repeat_interleave(size)
+
+        select_indexing[cat_index] = selected_idx
+
+    return select_indexing
+
+
+def _select_and_decrement(
+    batch: SelectableTensorMaping,
+    keys: Iterable[str],
+    batching: Dict[str, Batching],
+    idx: torch.LongTensor,
+    indexing: Dict[str, torch.LongTensor],
+    select_indexing: Optional[Dict[str, torch.LongTensor]] = None,
+) -> Dict[str, torch.LongTensor]:
+    result = {}
+
+    for key in keys:
+        inc = batching[key].inc
+        cat_dim = batching[key].cat_dim
+        cat_index = batching[key].shape[cat_dim]
+
+        if isinstance(cat_index, int):
+            a, b = torch.meshgrid(
+                (cat_index * idx, torch.arange(0, cat_index, dtype=torch.long))
+            )
+            current_idx = (a + b).flatten()
+            data = batch[key].index_select(cat_dim, current_idx)
+        elif select_indexing is None:
+            data = batch[key].clone()
+        else:
+            current_idx = select_indexing[cat_index]
+            data = batch[key].index_select(cat_dim, current_idx)
+
+        if inc != 0:
+            if isinstance(inc, str):
+                offset = indexing[inc]
             else:
-                selected_idx = idx.repeat_interleave(cat_index)
+                offset = inc * idx
 
-            indices_storage[cat_index] = selected_idx
+            size = indexing[cat_index][idx + 1] - indexing[cat_index][idx]
+            index = torch.arange(size.shape[0], dtype=torch.long).repeat_interleave(
+                size
+            )
 
-        result[key] = batch[key].index_select(cat_dim, indices_storage[cat_index])
+            selection = tuple(
+                None if i != cat_dim else index for i, s in enumerate(data.shape)
+            )
+            data -= offset[selection]
+
+        result[key] = data
 
     return result
 
 
-def _decrement_in_place(
-    data: [str, torch.Tensor],
+def _to_list(
+    cls: type,
+    data: Dict[str, torch.Tensor],
     batching: Dict[str, Batching],
     indexing: Dict[str, torch.LongTensor],
-) -> None:
-    for key, tensor in data.items():
-        inc = batching[key].inc
-        cat_dim = batching[key].cat_dim
+) -> List[StructureData]:
+    result = []
+    for i in range(data["periodic"].shape[0]):
+        kwargs = {}
 
-        if inc == 0:
-            continue
-        elif isinstance(inc, str):
-            inc_tensor = indexing[inc]
-        else:
-            inc_tensor = torch.arange(
-                0, inc * data.shape[cat_dim], inc, dtype=torch.LongTensor
-            )
+        for key in data.keys():
+            cat_dim = batching[key].cat_dim
+            cat_index = batching[key].shape[cat_dim]
+
+            if isinstance(cat_index, int):
+                idx = torch.arange(cat_index * i, cat_index * (i + 1), dtype=torch.long)
+            else:
+                idx = torch.arange(
+                    indexing[cat_index][i], indexing[cat_index][i + 1], dtype=torch.long
+                )
+            kwargs[key] = data[key].index_select(cat_dim, idx)
+
+        result.append(cls(**kwargs))
+    return result
 
 
 def separate(
@@ -169,6 +219,7 @@ def separate(
     idx: int | torch.LongTensor = None,
     batching: Dict[str, Batching] = None,
     indexing: Dict[str, torch.LongTensor] = None,
+    cls: type = None,
 ) -> List[StructureData]:
     if batching is None:
         assert hasattr(batch, "batching"), "Batching can't be inferred automatically."
@@ -182,17 +233,18 @@ def separate(
     else:
         keys = batch.keys
 
+    if cls is None:
+        cls = batch.__class__
+
     if idx is not None:
         if isinstance(idx, int):
             idx = torch.tensor([idx], dtype=torch.long)
         assert isinstance(idx, torch.LongTensor), "idx must be None, int or LongTensor"
-
-        data = _select_by_indices(batch, idx, keys, batching, indexing)
     else:
-        data = {key: batch[key].clone() for key in keys}
+        idx = torch.arange(batch["periodic"].shape[0], dtype=torch.long)
 
-    _decrement_in_place(data, batching, indexing)
+    select_indexing = _select_indexing(idx, keys, batching, indexing)
 
-    print(data)
+    data = _select_and_decrement(batch, keys, batching, idx, indexing, select_indexing)
 
-    return []
+    return _to_list(cls, data, batching, indexing)

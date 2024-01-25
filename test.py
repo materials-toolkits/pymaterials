@@ -63,11 +63,15 @@ print(batch.num_edges, batch.num_edges.sum().item())
 print(batch.num_triplets, batch.num_triplets.sum().item())
 print(batch.num_quadruplets, batch.num_quadruplets.sum().item())
 
-print(batch.edge_index)
 
-print(get_indexing(batch))
+results = separate(batch)
 
-print(separate(batch, idx=torch.arange(1, 4, dtype=torch.long)))
+print(lst[3].edge_index)
+print(results[3].edge_index)
+
+batch2 = collate(results)
+
+print(batch.edge_index == batch2.edge_index)
 
 exit(0)
 import shutil
