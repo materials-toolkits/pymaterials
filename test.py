@@ -4,11 +4,12 @@ import torch.nn as nn
 from materials_toolkit.data.datasets import MaterialsProject
 from materials_toolkit.data.filter import *
 from materials_toolkit.data.collate import *
+from materials_toolkit.data.loader import StructureLoader
 from torch_geometric.loader import DataLoader
 
 from pymatgen.core.periodic_table import Element
 
-
+"""
 def generate_data_list(count=128):
     torch.manual_seed(0)
     torch.use_deterministic_algorithms(True)
@@ -73,22 +74,41 @@ batch2 = collate(results)
 
 print(batch.edge_index == batch2.edge_index)
 
+print(get_indexing(batch))
+
 exit(0)
+"""
 import shutil
 
-shutil.rmtree("data/mp/processed")
+# shutil.rmtree("data/mp/processed")
 
 mp = MaterialsProject(
     "data/mp",
     pre_filter=FilterAtoms(included=[2, 10, 18, 36, 54, 86, 118]),
+    in_memory=False,
 )
-filter = SequentialFilter(FilterAtoms(excluded=[8]), FilterNumberOfAtoms(max=6))
+filter = SequentialFilter([FilterAtoms(excluded=[8]), FilterNumberOfAtoms(max=6)])
 
-loader = DataLoader(mp, batch_size=32)
+loader = StructureLoader(mp, batch_size=128, shuffle=False)
 
 print(len(mp))
 
-for structs in loader:
-    print(structs)
-    print(filter(structs))
-    break
+import tqdm
+
+import time
+
+t = []
+for structs in tqdm.tqdm(zip(loader, range(128))):
+    t.append(time.time())
+
+print(f"{torch.diff(torch.tensor(t, dtype=torch.double)).mean().item() * 1000}ms")
+
+from torch_geometric.datasets import ZINC
+
+zinc = ZINC("data/zinc")
+loader = DataLoader(zinc, batch_size=128, shuffle=False)
+
+t = []
+for batch in tqdm.tqdm(zip(loader, range(128))):
+    t.append(time.time())
+print(f"{torch.diff(torch.tensor(t, dtype=torch.double)).mean().item() * 1000}ms")

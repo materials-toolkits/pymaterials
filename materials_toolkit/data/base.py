@@ -75,6 +75,9 @@ class Batching:
                     var, int
                 ), "Shape must be integer exemple for the cat_dim dimensions."
 
+        cat_config = self.shape[self.cat_dim]
+        assert cat_config == 1 or isinstance(cat_config, str)
+
     def __getitem__(self, name: str) -> Any:
         if name in typing.get_type_hints(self):
             return self.__getattribute__(name)

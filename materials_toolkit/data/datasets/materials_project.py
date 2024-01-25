@@ -23,7 +23,7 @@ class MaterialsProject(HDF5Dataset):
         ]
         | None = None,
         pre_filter: Callable[[data.Data | data.HeteroData], bool] | None = None,
-        in_memory: bool | None = True,
+        in_memory: bool | None = False,
         **kwargs
     ):
         super().__init__(

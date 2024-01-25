@@ -173,12 +173,7 @@ def test_download_process(dataset_tmp_path):
 
     import h5py
 
-    print(dataset_tmp_path)
     f = h5py.File(os.path.join(dataset_tmp_path, "test-data/data.hdf5"))
-    print(f["data"].keys())
-    print(f["data"]["cell"][:])
-    print(f["data"]["periodic"][:])
-    print(dataset[1])
 
     with open(os.path.join(dataset_tmp_path, "ground-truth.pickle"), "rb") as fp:
         ground_truth = pickle.load(fp)

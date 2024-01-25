@@ -1,22 +1,32 @@
 from __future__ import annotations
+from sympy import group
 
 import torch
 import torch.nn.functional as F
 from torch_geometric import data
-from torch_geometric.data.collate import collate
+
+# from torch_geometric.data.collate import collate
 import h5py
 import numpy as np
 from tqdm import tqdm
 
-from typing import List, Tuple, Any, Optional, Union, Callable, Dict
+from typing import Iterable, Iterator, List, Tuple, Any, Optional, Union, Callable, Dict
 import os
 import json
 import hashlib
 
 from .utils import uncompress_progress, download_progress, get_filename
 from .base import StructureData, BatchingEncoder
+from .collate import (
+    SelectableTensor,
+    SelectableTensorMaping,
+    collate,
+    separate,
+    get_indexing,
+)
 
 
+"""
 class Selector(h5py.Dataset):
     def __init__(self, dataset: h5py.Dataset, tensor: Optional[torch.Tensor] = None):
         self._dataset = dataset
@@ -156,6 +166,52 @@ class HDF5FileWrapper(h5py.File):
             )
 
         return item
+"""
+
+
+class HDF5TensorWrapper(SelectableTensor):
+    def __init__(self, dataset: h5py.Dataset):
+        self.dataset = dataset
+
+    def __getitem__(self, args: int | torch.LongTensor | tuple) -> torch.Tensor:
+        return torch.from_numpy(self.dataset[args])
+
+    def index_select(self, dim: int, index: torch.LongTensor) -> torch.Tensor:
+        idx = tuple(
+            slice(None) if i != dim else index for i, s in enumerate(self.dataset.shape)
+        )
+        return torch.from_numpy(self.dataset[idx])
+
+    @property
+    def shape(self) -> tuple:
+        return self.dataset.shape
+
+
+class HDF5GroupWrapper(SelectableTensorMaping):
+    def __init__(self, group: h5py.Group, caching: bool = False):
+        self.group: h5py.Group = group
+        self.caching: bool = caching
+        self._cache: Dict[str, torch.Tensor] = {}
+
+    def __iter__(self) -> Iterator[str]:
+        return self.group.__iter__()
+
+    def __len__(self) -> int:
+        return self.group.__len__()
+
+    def load_all(self):
+        for key in self.group.keys():
+            self._load(key)
+
+    def _load(self, key: str) -> SelectableTensor:
+        self._cache[key] = torch.from_numpy(self.group[key][:])
+
+    def __getitem__(self, key: str) -> SelectableTensor:
+        if self.caching:
+            self._load(key)
+            return self._cache[key]
+
+        return HDF5TensorWrapper(self.group[key])
 
 
 class HDF5Dataset(data.Dataset):
@@ -211,9 +267,16 @@ class HDF5Dataset(data.Dataset):
             **kwargs,
         )
 
-        self.data_hdf5 = HDF5FileWrapper(self.processed_file, "r")
+        file = h5py.File(self.processed_file, "r")
+
+        self.indexing = {
+            key: torch.from_numpy(d[:]) for key, d in file["indexing"].items()
+        }
+
+        self.data_hdf5 = HDF5GroupWrapper(file["data"], self.in_memory)
+
         if self.in_memory:
-            self.data_hdf5.load()
+            self.data_hdf5.load_all()
 
     @property
     def raw_file_names(self) -> str:
@@ -262,10 +325,7 @@ class HDF5Dataset(data.Dataset):
                 "md5 of the downloaded file doesn't match with the expected md5"
             )
 
-    @staticmethod
-    def length_hdf5(file: HDF5FileWrapper) -> int:
-        return file["data"]["periodic"].shape[0]
-
+    """
     @classmethod
     def _get_structure(
         cls,
@@ -314,18 +374,38 @@ class HDF5Dataset(data.Dataset):
     @classmethod
     def read_hdf5(cls, file: HDF5FileWrapper, idx: int) -> StructureData:
         return cls._get_structure(idx, file["data"], file["slice"], file["inc"])
+    """
 
     @classmethod
-    def create_dataset(cls, path: str, structures: List[StructureData]):
+    def create_dataset(
+        cls,
+        path: str,
+        structures: List[StructureData],
+        data_file: str = "data.hdf5",
+        batching_file: str = "batching.json",
+    ):
         os.makedirs(path, exist_ok=True)
 
-        with open(os.path.join(path, "batching.json"), "w") as fp:
+        with open(os.path.join(path, batching_file), "w") as fp:
             json.dump(structures[0].batching, fp, cls=BatchingEncoder)
 
-        cls.write_hdf5(
-            HDF5FileWrapper(os.path.join(path, "data.hdf5"), "w"), structures
-        )
+        batched = collate(structures)
+        indexing = get_indexing(batched)
 
+        file = h5py.File(os.path.join(path, data_file), "w")
+
+        group_data = file.create_group("data")
+        for key in batched.keys:
+            group_data.create_dataset(key, data=batched[key].numpy())
+
+        group_indexing = file.create_group("indexing")
+        for key, index in indexing.items():
+            group_indexing.create_dataset(key, data=index.numpy())
+
+        file.flush()
+        file.close()
+
+    """
     @staticmethod
     def write_hdf5(file: HDF5FileWrapper, structures: List[StructureData]):
         cls = type(structures[0])
@@ -350,6 +430,7 @@ class HDF5Dataset(data.Dataset):
         for key in keys:
             if isinstance(cls.batching[key].inc, str):
                 group_inc.create_dataset(key, data=inc_dict[key].numpy())
+    """
 
     def process(self):
         preprocessing = (self.pre_transform is not None) or (
@@ -366,35 +447,65 @@ class HDF5Dataset(data.Dataset):
             )
 
         if preprocessing:
-            raw_data = HDF5FileWrapper(self.raw_file, "r")
+            raw_data = h5py.File(self.raw_file, "r")
+
+            data_hdf5 = HDF5GroupWrapper(raw_data["data"], self.in_memory)
+            indexing = {
+                key: torch.from_numpy(d[:]) for key, d in raw_data["indexing"].items()
+            }
+
+            class StructureIterator(Iterable[StructureData]):
+                def __init__(
+                    self,
+                    data: HDF5GroupWrapper,
+                    indexing: Dict[str, torch.LongTensor],
+                    data_type,
+                ):
+                    self.data = data
+                    self.indexing = indexing
+                    self.data_type = data_type
+
+                def __len__(self) -> int:
+                    return 1 << 10
+                    return self.indexing["num_structures"].items()
+
+                def __iter__(self) -> StructureData:
+                    for i in range(len(self)):
+                        print(i)
+                        yield separate(
+                            self.data, i, cls=self.data_type, indexing=self.indexing
+                        )
 
             processed_dataset = []
-            length = self.length_hdf5(raw_data)
-            length = 1 << 14
-            idx = torch.arange(length)
+            it = StructureIterator(data_hdf5, indexing, self.data_class)
 
-            for index in tqdm(idx, desc="preprocessing", unit="structure", leave=False):
-                structs = self.read_hdf5(raw_data, index)
-
+            for struct in tqdm(it, desc="preprocessing", unit="structure", leave=False):
                 if self.pre_filter is not None:
-                    if not self.pre_filter(structs):
+                    if not self.pre_filter(struct):
                         continue
 
                 if self.pre_transform is not None:
-                    structs = self.pre_transform(structs)
+                    struct = self.pre_transform(struct)
 
-                processed_dataset.append(structs)
+                processed_dataset.append(struct)
 
-            processed_data = HDF5FileWrapper(self.processed_file, "w")
-            self.write_hdf5(processed_data, processed_dataset)
+            self.create_dataset(
+                self.processed_dir, processed_dataset, data_file=self.data_file
+            )
 
     def len(self) -> int:
         r"""Returns the number of data objects stored in the dataset."""
-        return self.length_hdf5(self.data_hdf5)
+        return self.indexing["num_structures"].item()
 
-    def get(self, idx: int) -> StructureData:
+    def get(self, idx: int | torch.LongTensor) -> StructureData:
         r"""Gets the data object at index :obj:`idx`."""
-        return self.read_hdf5(self.data_hdf5, idx)
+        return separate(
+            self.data_hdf5,
+            idx,
+            cls=self.data_class,
+            indexing=self.indexing,
+            to_list=False,
+        )
 
     def close(self):
         self.data_hdf5.close()
