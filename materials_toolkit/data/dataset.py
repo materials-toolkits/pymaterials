@@ -14,6 +14,7 @@ from typing import Iterable, Iterator, List, Tuple, Any, Optional, Union, Callab
 import os
 import json
 import hashlib
+from abc import ABCMeta, abstractmethod
 
 from .utils import uncompress_progress, download_progress, get_filename
 from .base import StructureData, BatchingEncoder
@@ -24,6 +25,12 @@ from .collate import (
     separate,
     get_indexing,
 )
+
+
+class DatasetWithEnergy(metaclass=ABCMeta):
+    @abstractmethod
+    def test(self):
+        pass
 
 
 """
@@ -174,11 +181,17 @@ class HDF5TensorWrapper(SelectableTensor):
         self.dataset = dataset
 
     def __getitem__(self, args: int | torch.LongTensor | tuple) -> torch.Tensor:
+        if isinstance(index, torch.Tensor):
+            index = index.numpy()
+
         return torch.from_numpy(self.dataset[args])
 
     def index_select(self, dim: int, index: torch.LongTensor) -> torch.Tensor:
+        if isinstance(index, torch.Tensor):
+            index = index.numpy()
+
         idx = tuple(
-            slice(None) if i != dim else index for i, s in enumerate(self.dataset.shape)
+            slice(None) if i != dim else index for i, _ in enumerate(self.dataset.shape)
         )
         return torch.from_numpy(self.dataset[idx])
 

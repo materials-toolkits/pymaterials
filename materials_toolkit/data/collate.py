@@ -187,24 +187,17 @@ def _select_and_decrement(
             continue
         else:
             current_idx = select_indexing[cat_index]
-            import time
-
-            # print(type(batch[key]))
-            # t0 = time.time()
             data = batch[key].index_select(cat_dim, current_idx)
-            # t1 = time.time()
-            # print(f"{(t1-t0)*1e3:.1f}ms")
 
         if inc != 0:
             if isinstance(inc, str):
+                print("dec", key, inc, indexing[inc])
                 offset = indexing[inc]
             else:
                 offset = inc * idx
 
             size = indexing[cat_index][idx + 1] - indexing[cat_index][idx]
-            index = torch.arange(size.shape[0], dtype=torch.long).repeat_interleave(
-                size
-            )
+            index = indexing[cat_index][idx].repeat_interleave(size)
 
             selection = tuple(
                 None if i != cat_dim else index for i, _ in enumerate(data.shape)
