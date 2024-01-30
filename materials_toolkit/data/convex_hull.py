@@ -6,7 +6,7 @@ from pymatgen.core import Element, Composition
 from pymatgen.analysis.phase_diagram import PhaseDiagram, PDEntry
 
 from abc import ABCMeta, abstractmethod
-from typing import List, Dict
+from typing import List, Dict, Set
 
 from materials_toolkit.data.collate import separate
 
@@ -145,6 +145,21 @@ class DatasetWithEnergy(metaclass=ABCMeta):
         def __len__(self) -> int:
             return self.atomic_numbers.shape[0]
 
+        def __hash__(self) -> int:
+            return hash(self.key)
+
+        """
+        def __eq__(self, other: DatasetWithEnergy.Entry) -> bool:
+            return (
+                (self.atomic_numbers == other.atomic_numbers).all()
+                and (self.count == other.count).all()
+                and self.energy_pa == other.energy_pa
+            )
+
+        def __ne__(self, other: DatasetWithEnergy.Entry) -> bool:
+            return not self.__eq__(other)
+        """
+
         def __contains__(self, other: DatasetWithEnergy.Entry) -> bool:
             if not isinstance(other, DatasetWithEnergy.Entry):
                 return False
@@ -156,21 +171,38 @@ class DatasetWithEnergy(metaclass=ABCMeta):
             )
 
         @classmethod
+        def _recursive_add(
+            cls,
+            inclusion: Dict[DatasetWithEnergy.Entry, dict],
+            entries: Dict[DatasetWithEnergy.Entry, List[DatasetWithEnergy.Entry]],
+            entry: DatasetWithEnergy.Entry,
+        ):
+            if entry in entries:
+                entries.append(entry)
+                return
+
+            new_key = True
+            for key, subdict in inclusion.items():
+                if key in entry:
+                    print(key, "in", entry)
+                    new_key = False
+                    print("recursive in", key, "with", entry)
+                    cls._recursive_add(subdict, entry, new_entries)
+
+            if new_key:
+                print("add", entry)
+                inclusion[entry] = new_entries
+
+        @classmethod
         def inclusion_graph(
             cls, entries: List[DatasetWithEnergy.Entry]
         ) -> Dict[str, List[DatasetWithEnergy.Entry]]:
-            entries = sorted(entries, key=len)
+            entries = sorted(entries[:32], key=len)
             print(entries[:10])
             print(entries[-10:])
 
-            inclusion = {}
-            leafs = []
+            inclusion, dict_entries = {}, {}
             for entry in entries:
-                add = {}
-                for leaf in leafs:
-                    if leaf in entry:
-                        add[leaf.key] = leaf
+                cls._recursive_add(inclusion, dict_entries, entry)
 
-                if len(add) == 0:
-                    leafs.append(entry)
-                    inclusion[entry.key] = []
+            print(inclusion)
