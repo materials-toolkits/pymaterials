@@ -1,5 +1,6 @@
 import torch
 import torch_geometric
+from torch_geometric.data import Dataset
 import numpy as np
 
 import json
@@ -249,6 +250,7 @@ class StructureData(torch_geometric.data.Data):
         "batch_quadruplets": Batching(
             inc=1, shape=("num_quadruplets",), dtype=torch.long
         ),
+        "energy_pa": Batching(),
     }
 
     def __init__(
@@ -262,6 +264,7 @@ class StructureData(torch_geometric.data.Data):
         triplet_index: Optional[torch.LongTensor] = None,
         quadruplet_index: Optional[torch.LongTensor] = None,
         periodic: Optional[Union[bool, torch.BoolTensor]] = None,
+        dataset: Dataset = None,
         **kwargs,
     ):
         periodic = self._default_periodic(periodic, cell)
@@ -284,6 +287,17 @@ class StructureData(torch_geometric.data.Data):
         self._auto_fill(kwargs)
 
         super().__init__(**kwargs)
+
+        self._num_structures = torch.tensor([periodic.shape[0]])
+        self._dataset = dataset
+
+    @property
+    def num_structures(self) -> int:
+        return self._num_structures
+
+    def set_dataset(self, dataset: Dataset):
+        self._dataset = dataset
+        return self
 
     def filter_apply(self, mask: torch.BoolTensor) -> torch_geometric.data.Data:
         data = {}
@@ -311,6 +325,19 @@ class StructureData(torch_geometric.data.Data):
             data[key] = current
 
         return self.__class__(**data)
+
+    def get_energy_above_hull(self) -> torch.FloatTensor:
+        if "energy_above_hull" in self._store:
+            return self._store["energy_above_hull"]
+
+        assert (
+            hasattr(self._dataset, "calculate_e_above_hull")
+            and "energy_pa" in self._store
+        )
+
+        self.energy_above_hull = self._dataset.calculate_e_above_hull(self)
+
+        return self.energy_above_hull
 
     @classmethod
     def _merge_kwargs(

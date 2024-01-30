@@ -9,6 +9,15 @@ from torch_geometric.loader import DataLoader
 
 from pymatgen.core.periodic_table import Element
 
+from materials_toolkit.data.convex_hull import Entry
+
+a = Entry(torch.tensor([1, 3, 5, 4]))
+b = Entry(torch.tensor([1, 3]))
+
+print(a in b)
+print(b in a)
+exit(0)
+
 """
 def generate_data_list(count=128):
     torch.manual_seed(0)
@@ -79,6 +88,7 @@ print(get_indexing(batch))
 exit(0)
 """
 import shutil
+import tqdm
 
 # shutil.rmtree("data/mp/processed")
 
@@ -86,19 +96,22 @@ mp = MaterialsProject(
     "data/mp",
     pre_filter=FilterAtoms(included=[2, 10, 18, 36, 54, 86, 118]),
     in_memory=False,
+    use_convex_hull=True,
 )
+print(mp.phase_diagram)
 filter = SequentialFilter([FilterAtoms(excluded=[8]), FilterNumberOfAtoms(max=6)])
 
-loader = StructureLoader(mp, batch_size=128, shuffle=False)
+loader = StructureLoader(mp, batch_size=32, shuffle=False)
 
 print(len(mp))
 
-import tqdm
 
 import time
 
 t = []
-for structs in tqdm.tqdm(zip(loader, range(128))):
+for structs in tqdm.tqdm(loader):
+    structs.get_energy_above_hull()
+    # print(structs.get_energy_above_hull())
     t.append(time.time())
 
 print(f"{torch.diff(torch.tensor(t, dtype=torch.double)).mean().item() * 1000}ms")

@@ -1,20 +1,25 @@
 from __future__ import annotations
-from sympy import group
 
 import torch
 import torch.nn.functional as F
 from torch_geometric import data
 
-# from torch_geometric.data.collate import collate
 import h5py
 import numpy as np
 from tqdm import tqdm
+from tqdm.contrib.concurrent import process_map
 
 from typing import Iterable, Iterator, List, Tuple, Any, Optional, Union, Callable, Dict
 import os
 import json
 import hashlib
-from abc import ABCMeta, abstractmethod
+import warnings
+
+from materials_toolkit.data.convex_hull import DatasetWithEnergy, Entry
+from pymatgen.analysis.phase_diagram import PDEntry, PhaseDiagram
+from pymatgen.core.composition import Composition
+from pymatgen.core import Element
+from torch_scatter import scatter_mul
 
 from .utils import uncompress_progress, download_progress, get_filename
 from .base import StructureData, BatchingEncoder
@@ -27,164 +32,15 @@ from .collate import (
 )
 
 
-class DatasetWithEnergy(metaclass=ABCMeta):
-    @abstractmethod
-    def test(self):
-        pass
-
-
-"""
-class Selector(h5py.Dataset):
-    def __init__(self, dataset: h5py.Dataset, tensor: Optional[torch.Tensor] = None):
-        self._dataset = dataset
-        self._tensor = tensor
-
-    def __getattr__(self, name: str) -> Any:
-        if name in ("_dataset", "_tensor"):
-            return super(Selector, self).__getattr__(name)
-
-        return getattr(self._dataset, name)
-
-    def __setattr__(self, name: str, value: Any):
-        if name in ("_dataset", "_tensor"):
-            return super(Selector, self).__setattr__(name, value)
-
-        return setattr(self._dataset, name, value)
-
-    def select_slice(self, dim: int, start: int, stop: int) -> torch.Tensor:
-        ndim = self._dataset.ndim
-
-        slices = tuple(
-            slice(None) if i != dim else slice(start, stop) for i in range(ndim)
-        )
-
-        if self._tensor is None:
-            return torch.from_numpy(self._dataset[slices])
-        else:
-            return self._tensor[slices]
-
-    def __getitem__(
-        self, indices: Union[None, int, slice, torch.LongTensor, List, Tuple]
-    ) -> torch.Tensor:
-        if self._tensor is None:
-            if isinstance(indices, torch.Tensor):
-                indices = indices.numpy()
-
-            d = self._dataset[indices]
-            if isinstance(d, np.ndarray):
-                return torch.from_numpy(d)
-
-            return torch.tensor([d])
-        else:
-            return self._tensor[indices]
-
-    def __setitem__(
-        self,
-        indices: Union[None, int, slice, torch.LongTensor, List, Tuple],
-        tensor: Union[np.ndarray, torch.Tensor],
-    ):
-        if self._tensor is not None:
-            if isinstance(tensor, torch.Tensor):
-                self._dataset[indices] = tensor
-            else:
-                self._dataset[indices] = torch.from_numpy(tensor)
-
-        self._dataset[indices] = tensor
-
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({super().__repr__()})"
-
-
-class HDF5GroupWrapper(h5py.Group):
-    def __init__(self, id: Any, local: Optional[Dict[str, Union[Dict, torch.Tensor]]]):
-        super().__init__(id)
-
-        self.local = local
-
-    def shape(self, key: str) -> tuple:
-        return self.group[key].shape
-
-    def __getitem__(self, key: str) -> Union[h5py.Group, Selector]:
-        item = super().__getitem__(key)
-
-        if isinstance(item, h5py.Dataset):
-            item = Selector(
-                item,
-                None if self.local is None else self.local[key],
-            )
-        elif isinstance(item, h5py.Group):
-            item = HDF5GroupWrapper(
-                item.id,
-                None
-                if (self.local is None) or (key not in self.local)
-                else self.local[key],
-            )
-
-        return item
-
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({super().__repr__()})"
-
-
-class HDF5FileWrapper(h5py.File):
-    def __init__(self, *args, load: bool = False, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        self.local: Dict[str, torch.Tensor] = None
-
-        if load:
-            self.load()
-
-    @staticmethod
-    def load_dataset(dataset: h5py.Group) -> Dict[str, Union[Dict, torch.Tensor]]:
-        result = {}
-        for key, value in dataset.items():
-            if isinstance(value, h5py.Group):
-                inner_dict = HDF5FileWrapper.load_dataset(value)
-                result[key] = inner_dict
-            else:
-                result[key] = value[:]
-
-        return result
-
-    def load(self):
-        self.local = HDF5FileWrapper.load_dataset(self)
-
-    def shape(self, key: str) -> tuple:
-        return self[key].shape
-
-    def is_loaded(self) -> bool:
-        return self.local is not None
-
-    def __getitem__(self, key: str) -> Union[h5py.Group, Selector]:
-        item = super().__getitem__(key)
-
-        if isinstance(item, h5py.Dataset):
-            item = Selector(
-                item,
-                None if self.local is None else self.local[key],
-            )
-        elif isinstance(item, h5py.Group):
-            item = HDF5GroupWrapper(
-                item.id,
-                None
-                if (self.local is None) or (key not in self.local)
-                else self.local[key],
-            )
-
-        return item
-"""
-
-
 class HDF5TensorWrapper(SelectableTensor):
     def __init__(self, dataset: h5py.Dataset):
         self.dataset = dataset
 
     def __getitem__(self, args: int | torch.LongTensor | tuple) -> torch.Tensor:
-        if isinstance(index, torch.Tensor):
-            index = index.numpy()
+        if isinstance(args, torch.Tensor):
+            args = args.numpy()
 
-        return torch.from_numpy(self.dataset[args])
+        return torch.tensor(self.dataset[args])
 
     def index_select(self, dim: int, index: torch.LongTensor) -> torch.Tensor:
         if isinstance(index, torch.Tensor):
@@ -193,7 +49,7 @@ class HDF5TensorWrapper(SelectableTensor):
         idx = tuple(
             slice(None) if i != dim else index for i, _ in enumerate(self.dataset.shape)
         )
-        return torch.from_numpy(self.dataset[idx])
+        return torch.tensor(self.dataset[idx])
 
     @property
     def shape(self) -> tuple:
@@ -227,7 +83,20 @@ class HDF5GroupWrapper(SelectableTensorMaping):
         return HDF5TensorWrapper(self.group[key])
 
 
-class HDF5Dataset(data.Dataset):
+def _process_hull(args):
+    key, entries = args
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore")
+
+        try:
+            return (key, PhaseDiagram(entries))
+        except ValueError as e:
+            print("ValueError", entries, e)
+            return (key, None)
+
+
+class HDF5Dataset(data.Dataset, DatasetWithEnergy):
     data_class = StructureData
 
     def __init__(
@@ -252,6 +121,7 @@ class HDF5Dataset(data.Dataset):
         scalars_keys: Optional[List[str]] = [],
         compressed_file: Optional[str] = None,
         in_memory: Optional[bool] = False,
+        use_convex_hull: bool = False,
         **kwargs,
     ):
         self.url = url
@@ -267,7 +137,7 @@ class HDF5Dataset(data.Dataset):
             ".tar",
             ".gz",
         ):
-            self.compressed_file = "compressed"
+            self.compressed_file = None
         self.in_memory = in_memory
 
         self.scalars_keys = scalars_keys
@@ -291,13 +161,19 @@ class HDF5Dataset(data.Dataset):
         if self.in_memory:
             self.data_hdf5.load_all()
 
-    @property
-    def raw_file_names(self) -> str:
-        return self.compressed_file
+        if use_convex_hull:
+            self.compute_convex_hull()
 
     @property
-    def processed_file_names(self) -> str:
-        return self.data_file
+    def raw_file_names(self) -> List[str]:
+        if self.compressed_file is None:
+            return []
+
+        return [self.compressed_file]
+
+    @property
+    def processed_file_names(self) -> List[str]:
+        return [self.data_file]
 
     @property
     def downloaded_file(self) -> str:
@@ -324,8 +200,35 @@ class HDF5Dataset(data.Dataset):
 
         return md5.hexdigest()
 
+    def entries(self, composition: torch.LongTensor) -> List[PDEntry]:
+        result = []
+        mask = torch.zeros(128, dtype=torch.long).scatter(
+            0, composition.long(), torch.ones_like(composition, dtype=torch.long)
+        )
+
+        z = torch.from_numpy(self.data_hdf5["z"].dataset[:])
+        num_atoms = torch.from_numpy(self.data_hdf5["num_atoms"].dataset[:])
+        batch = torch.arange(num_atoms.shape[0]).repeat_interleave(num_atoms, 0)
+        filtered = scatter_mul(mask[z], batch)
+        idx = filtered.nonzero().flatten()
+
+        for struct in separate(self.get(idx)):
+            atomic_number, count = struct.z.unique(return_counts=True)
+
+            comp = Composition(
+                {z.item(): n.item() for z, n in zip(atomic_number, count)}
+            )
+            energy = struct["energy_pa"].item() * struct["num_atoms"].item()
+
+            result.append(PDEntry(comp, energy))
+
+        return result
+
     def download(self):
         r"""Downloads the dataset to the :obj:`self.raw_dir` folder."""
+
+        if self.url is None:
+            return
 
         download_progress(
             self.url, self.downloaded_file, desc=f"downloading {self.compressed_file}"
@@ -338,56 +241,55 @@ class HDF5Dataset(data.Dataset):
                 "md5 of the downloaded file doesn't match with the expected md5"
             )
 
-    """
-    @classmethod
-    def _get_structure(
-        cls,
-        idx: int,
-        group_data: Dict[str, torch.Tensor],
-        group_slice: Dict[str, torch.Tensor],
-        group_inc: Dict[str, torch.Tensor],
-    ):
-        cls_data = cls.data_class
+    def compute_convex_hull(self):
+        systems = {}
+        for struct in tqdm(
+            separate(
+                self.data_hdf5,
+                cls=self.data_class,
+                indexing=self.indexing,
+                to_iterator=True,
+                keys=["z", "energy_pa"],
+            ),
+            total=len(self),
+            desc="collect energy to calculate convex hull",
+            leave=False,
+        ):
+            DatasetWithEnergy.Entry(struct.z, struct.energy_pa)
+            key = self.get_key(struct.z)
 
-        data_dict = {}
-        for key in group_data.keys():
-            if key in group_slice:
-                start = group_slice[key][idx].item()
-                end = group_slice[key][idx + 1].item()
-            else:
-                size = cls_data.batching[key].shape
-                if isinstance(size, tuple):
-                    size = size[cls_data.batching[key].cat_dim]
-                assert isinstance(size, int)
-                start, end = size * idx, size * (idx + 1)
+            composition = self.get_composition(struct.z)
+            total_energy = struct.energy_pa.item() * struct.z.shape[0]
 
-            if key in group_inc:
-                inc = group_inc[key][idx]
-            elif isinstance(cls_data.batching[key].inc, int):
-                inc = cls_data.batching[key].inc * idx
-            else:
-                inc = None
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore")
+                entry = PDEntry(composition, total_energy)
 
-            data_key = group_data[key].select_slice(
-                cls_data.batching[key].cat_dim, start, end
-            )
+            systems[key] = systems.get(key, []) + [entry]
 
-            if inc != 0 and data_key.dtype != torch.bool:
-                data_key -= inc
+        systems = sorted(
+            list((k, s) for k, s in systems.items()),
+            key=lambda x: len(x[0]),
+            reverse=True,
+        )
+        print(systems)
 
-            data_dict[key] = data_key
-
-        print(data_dict)
-        return cls.data_class(**data_dict)
-
-    @classmethod
-    def separate(cls, data: data.Batch) -> List[StructureData]:
-        data.to_data_list
-
-    @classmethod
-    def read_hdf5(cls, file: HDF5FileWrapper, idx: int) -> StructureData:
-        return cls._get_structure(idx, file["data"], file["slice"], file["inc"])
-    """
+        hulls = []
+        for args in systems.items():
+            res = _process_hull(args)
+            if res[1] is not None:
+                print(res)
+            hulls.append(res)
+        """
+        hulls = process_map(
+            _process_hull,
+            systems.items(),
+            chunksize=16,
+            desc="calculate convex hulls",
+            leave=False,
+        )
+        """
+        self.phase_diagram = {key: hull for key, hull in hulls}
 
     @classmethod
     def create_dataset(
@@ -418,33 +320,6 @@ class HDF5Dataset(data.Dataset):
         file.flush()
         file.close()
 
-    """
-    @staticmethod
-    def write_hdf5(file: HDF5FileWrapper, structures: List[StructureData]):
-        cls = type(structures[0])
-        batched, slice_dict, inc_dict = collate(cls, data_list=structures)
-
-        keys = list(filter(lambda key: key in structures[0], cls.batching.keys()))
-
-        group_data = file.create_group("data")
-        for key in keys:
-            group_data.create_dataset(key, data=batched[key].numpy())
-
-        group_slice = file.create_group("slice")
-        for key in keys:
-            if isinstance(cls.batching[key].shape, str):
-                group_slice.create_dataset(key, data=slice_dict[key].numpy())
-            elif isinstance(cls.batching[key].shape, tuple) and any(
-                map(lambda x: isinstance(x, str), cls.batching[key].shape)
-            ):
-                group_slice.create_dataset(key, data=slice_dict[key].numpy())
-
-        group_inc = file.create_group("inc")
-        for key in keys:
-            if isinstance(cls.batching[key].inc, str):
-                group_inc.create_dataset(key, data=inc_dict[key].numpy())
-    """
-
     def process(self):
         preprocessing = (self.pre_transform is not None) or (
             self.pre_filter is not None
@@ -460,6 +335,7 @@ class HDF5Dataset(data.Dataset):
             )
 
         if preprocessing:
+            raise NotImplementedError("preprocessing is not implemented yet")
             raw_data = h5py.File(self.raw_file, "r")
 
             data_hdf5 = HDF5GroupWrapper(raw_data["data"], self.in_memory)
@@ -518,7 +394,7 @@ class HDF5Dataset(data.Dataset):
             cls=self.data_class,
             indexing=self.indexing,
             to_list=False,
-        )
+        ).set_dataset(self)
 
     def close(self):
         self.data_hdf5.close()

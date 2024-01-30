@@ -1,6 +1,6 @@
 import torch
-from torch._tensor import Tensor
 import torch.nn.functional as F
+from torch_scatter import scatter_add
 
 from materials_toolkit.data.base import Batching, StructureData
 
@@ -161,9 +161,6 @@ def _select_indexing(
     return selecting_index, selected_index
 
 
-from torch_scatter import scatter_add
-
-
 def _select_and_decrement(
     batch: SelectableTensorMaping,
     keys: Iterable[str],
@@ -197,7 +194,10 @@ def _select_and_decrement(
                 offset = inc * idx
 
             size = indexing[cat_index][idx + 1] - indexing[cat_index][idx]
-            index = indexing[cat_index][idx].repeat_interleave(size)
+            index = torch.arange(size.shape[0], dtype=torch.long).repeat_interleave(
+                size
+            )
+            # index = indexing[cat_index][idx].repeat_interleave(size)
 
             selection = tuple(
                 None if i != cat_dim else index for i, _ in enumerate(data.shape)
@@ -209,14 +209,13 @@ def _select_and_decrement(
     return result
 
 
-def _to_list(
+def _to_generator(
     cls: type,
     data: Dict[str, torch.Tensor],
     idx: torch.LongTensor,
     batching: Dict[str, Batching],
     indexing: Dict[str, torch.LongTensor],
-) -> List[StructureData]:
-    result = []
+):
     for i in range(idx.shape[0]):
         kwargs = {}
 
@@ -232,8 +231,7 @@ def _to_list(
                 )
             kwargs[key] = data[key].index_select(cat_dim, idx)
 
-        result.append(cls(**kwargs))
-    return result
+        yield cls(**kwargs)
 
 
 def separate(
@@ -242,6 +240,8 @@ def separate(
     cls: type = None,
     indexing: Dict[str, torch.LongTensor] = None,
     to_list: bool = True,
+    to_iterator: bool = False,
+    keys: Iterable[str] = None,
 ) -> List[StructureData] | StructureData:
     if cls is None:
         cls = batch.__class__
@@ -252,23 +252,27 @@ def separate(
     if indexing is None:
         indexing = get_indexing(batch, batching)
 
-    if isinstance(batch.keys, Callable):
-        keys = batch.keys()
-    else:
-        keys = batch.keys
+    if keys is None:
+        if isinstance(batch.keys, Callable):
+            keys = batch.keys()
+        else:
+            keys = batch.keys
 
     if idx is not None:
         if isinstance(idx, int):
             idx = torch.tensor([idx], dtype=torch.long)
         assert isinstance(idx, torch.LongTensor), "idx must be None, int or LongTensor"
     else:
-        idx = torch.arange(indexing["num_structures"], dtype=torch.long)
+        idx = torch.arange(indexing["num_structures"].item(), dtype=torch.long)
 
     selecting_index, selected_index = _select_indexing(idx, keys, batching, indexing)
 
     data = _select_and_decrement(batch, keys, batching, idx, indexing, selecting_index)
 
     if to_list:
-        return _to_list(cls, data, idx, batching, selected_index)
+        return list(_to_generator(cls, data, idx, batching, selected_index))
+
+    if to_iterator:
+        return _to_generator(cls, data, idx, batching, selected_index)
 
     return cls(**data)

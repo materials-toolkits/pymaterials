@@ -5,7 +5,7 @@ from ..base import StructureData, batching, Batching
 from ..dataset import HDF5Dataset
 
 
-@batching(material_id=Batching(dtype=torch.long), energy_pa=Batching())
+@batching(material_id=Batching(dtype=torch.long))
 class MaterialsProjectData(StructureData):
     pass
 
@@ -16,13 +16,9 @@ class MaterialsProject(HDF5Dataset):
     def __init__(
         self,
         root: str,
-        transform: Callable[[data.Data | data.HeteroData], data.Data | data.HeteroData]
-        | None = None,
-        pre_transform: Callable[
-            [data.Data | data.HeteroData], data.Data | data.HeteroData
-        ]
-        | None = None,
-        pre_filter: Callable[[data.Data | data.HeteroData], bool] | None = None,
+        transform: Callable[[data.Data], data.Data] | None = None,
+        pre_transform: Callable[[data.Data], data.Data] | None = None,
+        pre_filter: Callable[[data.Data], bool] | None = None,
         in_memory: bool | None = False,
         **kwargs
     ):
