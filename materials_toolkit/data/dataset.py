@@ -15,7 +15,7 @@ import json
 import hashlib
 import warnings
 
-from materials_toolkit.data.convex_hull import DatasetWithEnergy, Entry
+from materials_toolkit.data.convex_hull import DatasetWithEnergy
 from pymatgen.analysis.phase_diagram import PDEntry, PhaseDiagram
 from pymatgen.core.composition import Composition
 from pymatgen.core import Element
@@ -243,6 +243,7 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
 
     def compute_convex_hull(self):
         systems = {}
+        entries = []
         for struct in tqdm(
             separate(
                 self.data_hdf5,
@@ -255,18 +256,14 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
             desc="collect energy to calculate convex hull",
             leave=False,
         ):
-            DatasetWithEnergy.Entry(struct.z, struct.energy_pa)
-            key = self.get_key(struct.z)
+            entry = DatasetWithEnergy.Entry(struct.z, struct.energy_pa)
+            entries.append(entry)
 
-            composition = self.get_composition(struct.z)
-            total_energy = struct.energy_pa.item() * struct.z.shape[0]
+            # systems[entry.key()] = systems.get(entry.key(), []) + [entry.pd_entry]
 
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore")
-                entry = PDEntry(composition, total_energy)
+        DatasetWithEnergy.Entry.inclusion_graph(entries)
 
-            systems[key] = systems.get(key, []) + [entry]
-
+        return
         systems = sorted(
             list((k, s) for k, s in systems.items()),
             key=lambda x: len(x[0]),

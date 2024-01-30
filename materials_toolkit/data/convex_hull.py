@@ -1,4 +1,5 @@
 from __future__ import annotations
+import warnings
 
 import torch
 from pymatgen.core import Element, Composition
@@ -10,7 +11,6 @@ from typing import List, Dict
 from materials_toolkit.data.collate import separate
 
 from .base import StructureData
-
 
 
 class DatasetWithEnergy(metaclass=ABCMeta):
@@ -130,26 +130,47 @@ class DatasetWithEnergy(metaclass=ABCMeta):
                 return self._pd_entry
 
             total_energy = self.z.shape[0] * self.energy_pa.item()
-            self._pd_entry = PDEntry(self.composition, total_energy)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore")
+                self._pd_entry = PDEntry(self.composition, total_energy)
 
             return self._pd_entry
 
         def __str__(self) -> str:
             return self.key
 
+        def __repr__(self) -> str:
+            return self.key
+
         def __len__(self) -> int:
             return self.atomic_numbers.shape[0]
 
-        def __contains__(self, other: Entry) -> bool:
-            if not isinstance(other, Entry):
+        def __contains__(self, other: DatasetWithEnergy.Entry) -> bool:
+            if not isinstance(other, DatasetWithEnergy.Entry):
                 return False
 
             return (
-                (self.atomic_numbers[:, None] == other.atomic_numbers[None, :]).any(0).all()
+                (self.atomic_numbers[:, None] == other.atomic_numbers[None, :])
+                .any(0)
+                .all()
             )
 
         @classmethod
-        def inclusion_graph(cls, entries: List[Entry]) -> Dict[str, List[Entry]]:
-            sorted(entries, key=len)
+        def inclusion_graph(
+            cls, entries: List[DatasetWithEnergy.Entry]
+        ) -> Dict[str, List[DatasetWithEnergy.Entry]]:
+            entries = sorted(entries, key=len)
             print(entries[:10])
             print(entries[-10:])
+
+            inclusion = {}
+            leafs = []
+            for entry in entries:
+                add = {}
+                for leaf in leafs:
+                    if leaf in entry:
+                        add[leaf.key] = leaf
+
+                if len(add) == 0:
+                    leafs.append(entry)
+                    inclusion[entry.key] = []

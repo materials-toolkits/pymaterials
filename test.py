@@ -9,15 +9,6 @@ from torch_geometric.loader import DataLoader
 
 from pymatgen.core.periodic_table import Element
 
-from materials_toolkit.data.convex_hull import Entry
-
-a = Entry(torch.tensor([1, 3, 5, 4]))
-b = Entry(torch.tensor([1, 3]))
-
-print(a in b)
-print(b in a)
-exit(0)
-
 """
 def generate_data_list(count=128):
     torch.manual_seed(0)
@@ -98,6 +89,7 @@ mp = MaterialsProject(
     in_memory=False,
     use_convex_hull=True,
 )
+exit(0)
 print(mp.phase_diagram)
 filter = SequentialFilter([FilterAtoms(excluded=[8]), FilterNumberOfAtoms(max=6)])
 
