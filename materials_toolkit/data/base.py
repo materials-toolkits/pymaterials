@@ -251,6 +251,7 @@ class StructureData(torch_geometric.data.Data):
             inc=1, shape=("num_quadruplets",), dtype=torch.long
         ),
         "energy_pa": Batching(),
+        "energy_above_hull": Batching(),
     }
 
     def __init__(
@@ -325,19 +326,6 @@ class StructureData(torch_geometric.data.Data):
             data[key] = current
 
         return self.__class__(**data)
-
-    def get_energy_above_hull(self) -> torch.FloatTensor:
-        if "energy_above_hull" in self._store:
-            return self._store["energy_above_hull"]
-
-        assert (
-            hasattr(self._dataset, "calculate_e_above_hull")
-            and "energy_pa" in self._store
-        )
-
-        self.energy_above_hull = self._dataset.calculate_e_above_hull(self)
-
-        return self.energy_above_hull
 
     @classmethod
     def _merge_kwargs(

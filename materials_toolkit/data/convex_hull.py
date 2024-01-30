@@ -8,6 +8,8 @@ from pymatgen.analysis.phase_diagram import PhaseDiagram, PDEntry
 from abc import ABCMeta, abstractmethod
 from typing import List, Dict, Set
 
+import tqdm
+
 from materials_toolkit.data.collate import separate
 
 from .base import StructureData
@@ -19,6 +21,10 @@ class DatasetWithEnergy(metaclass=ABCMeta):
 
     @abstractmethod
     def entries(self, composition: torch.LongTensor) -> List[PDEntry]:
+        pass
+
+    @abstractmethod
+    def compute_convex_hulls(self):
         pass
 
     def get_key(self, z: torch.LongTensor) -> str:
@@ -120,7 +126,7 @@ class DatasetWithEnergy(metaclass=ABCMeta):
             if hasattr(self, "_key"):
                 return self._key
 
-            self._key = "-".join(sorted(z.symbol for z in self.composition.elements))
+            self._key = "-".join(str(Element.from_Z(z)) for z in self.atomic_numbers)
 
             return self._key
 
@@ -148,17 +154,11 @@ class DatasetWithEnergy(metaclass=ABCMeta):
         def __hash__(self) -> int:
             return hash(self.key)
 
-        """
         def __eq__(self, other: DatasetWithEnergy.Entry) -> bool:
-            return (
-                (self.atomic_numbers == other.atomic_numbers).all()
-                and (self.count == other.count).all()
-                and self.energy_pa == other.energy_pa
-            )
+            return (self.atomic_numbers == other.atomic_numbers).all()
 
         def __ne__(self, other: DatasetWithEnergy.Entry) -> bool:
             return not self.__eq__(other)
-        """
 
         def __contains__(self, other: DatasetWithEnergy.Entry) -> bool:
             if not isinstance(other, DatasetWithEnergy.Entry):
@@ -171,38 +171,47 @@ class DatasetWithEnergy(metaclass=ABCMeta):
             )
 
         @classmethod
-        def _recursive_add(
+        def _recursive_build(
             cls,
             inclusion: Dict[DatasetWithEnergy.Entry, dict],
             entries: Dict[DatasetWithEnergy.Entry, List[DatasetWithEnergy.Entry]],
             entry: DatasetWithEnergy.Entry,
         ):
-            if entry in entries:
-                entries.append(entry)
-                return
-
             new_key = True
             for key, subdict in inclusion.items():
-                if key in entry:
-                    print(key, "in", entry)
+                if key in entry and entry not in subdict:
                     new_key = False
-                    print("recursive in", key, "with", entry)
-                    cls._recursive_add(subdict, entry, new_entries)
+                    cls._recursive_build(subdict, entries, entry)
 
             if new_key:
-                print("add", entry)
-                inclusion[entry] = new_entries
+                inclusion[entry] = {}
+
+        @classmethod
+        def _recursive_add(
+            cls,
+            inclusion: Dict[DatasetWithEnergy.Entry, dict],
+            entries: Dict[DatasetWithEnergy.Entry, List[DatasetWithEnergy.Entry]],
+        ):
+            for key, subdict in inclusion.items():
+                for subkey in subdict.keys():
+                    entries[subkey].extend(entries[key])
+
+                cls._recursive_add(subdict, entries)
 
         @classmethod
         def inclusion_graph(
             cls, entries: List[DatasetWithEnergy.Entry]
         ) -> Dict[str, List[DatasetWithEnergy.Entry]]:
-            entries = sorted(entries[:32], key=len)
-            print(entries[:10])
-            print(entries[-10:])
+            entries = sorted(entries, key=len)[: 1 << 13]
 
             inclusion, dict_entries = {}, {}
-            for entry in entries:
-                cls._recursive_add(inclusion, dict_entries, entry)
+            for entry in tqdm.tqdm(entries, desc="clusturise systems", leave=False):
+                if entry in dict_entries:
+                    dict_entries[entry].append(entry.pd_entry)
+                else:
+                    dict_entries[entry] = [entry.pd_entry]
+                    cls._recursive_build(inclusion, dict_entries, entry)
 
-            print(inclusion)
+            cls._recursive_add(inclusion, dict_entries)
+
+            return dict_entries

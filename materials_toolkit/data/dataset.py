@@ -1,4 +1,5 @@
 from __future__ import annotations
+from py import process
 
 import torch
 import torch.nn.functional as F
@@ -7,7 +8,7 @@ from torch_geometric import data
 import h5py
 import numpy as np
 from tqdm import tqdm
-from tqdm.contrib.concurrent import process_map
+from tqdm.contrib.concurrent import process_map, thread_map
 
 from typing import Iterable, Iterator, List, Tuple, Any, Optional, Union, Callable, Dict
 import os
@@ -72,6 +73,9 @@ class HDF5GroupWrapper(SelectableTensorMaping):
         for key in self.group.keys():
             self._load(key)
 
+    def __contains__(self, __key: object) -> bool:
+        return self.group.__contains__(__key)
+
     def _load(self, key: str) -> SelectableTensor:
         self._cache[key] = torch.from_numpy(self.group[key][:])
 
@@ -81,19 +85,6 @@ class HDF5GroupWrapper(SelectableTensorMaping):
             return self._cache[key]
 
         return HDF5TensorWrapper(self.group[key])
-
-
-def _process_hull(args):
-    key, entries = args
-
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore")
-
-        try:
-            return (key, PhaseDiagram(entries))
-        except ValueError as e:
-            print("ValueError", entries, e)
-            return (key, None)
 
 
 class HDF5Dataset(data.Dataset, DatasetWithEnergy):
@@ -142,6 +133,8 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
 
         self.scalars_keys = scalars_keys
 
+        self.use_convex_hull = use_convex_hull
+
         super().__init__(
             root=root,
             transform=transform,
@@ -160,9 +153,6 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
 
         if self.in_memory:
             self.data_hdf5.load_all()
-
-        if use_convex_hull:
-            self.compute_convex_hull()
 
     @property
     def raw_file_names(self) -> List[str]:
@@ -241,52 +231,59 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
                 "md5 of the downloaded file doesn't match with the expected md5"
             )
 
-    def compute_convex_hull(self):
-        systems = {}
+    def compute_convex_hulls(self):
+        file = h5py.File(self.raw_file, "r+")
+        data = HDF5GroupWrapper(file["data"])
+        indexing = {key: torch.from_numpy(d[:]) for key, d in file["indexing"].items()}
+        length = indexing["num_structures"].item()
+
+        if "energy_above_hull" in file:
+            return
+
         entries = []
         for struct in tqdm(
             separate(
-                self.data_hdf5,
+                data,
                 cls=self.data_class,
-                indexing=self.indexing,
+                indexing=indexing,
                 to_iterator=True,
                 keys=["z", "energy_pa"],
             ),
-            total=len(self),
+            total=length,
             desc="collect energy to calculate convex hull",
             leave=False,
         ):
             entry = DatasetWithEnergy.Entry(struct.z, struct.energy_pa)
             entries.append(entry)
 
-            # systems[entry.key()] = systems.get(entry.key(), []) + [entry.pd_entry]
+        systems = DatasetWithEnergy.Entry.inclusion_graph(entries)
 
-        DatasetWithEnergy.Entry.inclusion_graph(entries)
-
-        return
-        systems = sorted(
-            list((k, s) for k, s in systems.items()),
-            key=lambda x: len(x[0]),
-            reverse=True,
-        )
-        print(systems)
-
-        hulls = []
-        for args in systems.items():
-            res = _process_hull(args)
-            if res[1] is not None:
-                print(res)
-            hulls.append(res)
-        """
-        hulls = process_map(
-            _process_hull,
+        for key, entries in tqdm(
             systems.items(),
-            chunksize=16,
-            desc="calculate convex hulls",
-            leave=False,
+            desc="calculate convex hull",
+        ):
+            try:
+                hull = PhaseDiagram(entries)
+            except ValueError:
+                hull = None
+
+            self.phase_diagram[key] = hull
+
+        e_above_hull = []
+        for entry in tqdm(
+            entries,
+            desc="calculate energy above hull",
+        ):
+            energy = self.calculate_e_above_hull(entry)
+            e_above_hull.append(energy)
+
+        energies = torch.tensor(
+            e_above_hull, dtype=self.baching["energy_above_hull"].dtype
         )
-        """
-        self.phase_diagram = {key: hull for key, hull in hulls}
+
+        file["data"].create_dataset("energy_above_hull", data=energies)
+
+        file.close()
 
     @classmethod
     def create_dataset(
@@ -332,6 +329,10 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
             )
 
         if preprocessing:
+            if self.use_convex_hull:
+                self.compute_convex_hulls()
+
+            return
             raise NotImplementedError("preprocessing is not implemented yet")
             raw_data = h5py.File(self.raw_file, "r")
 

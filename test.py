@@ -81,7 +81,7 @@ exit(0)
 import shutil
 import tqdm
 
-# shutil.rmtree("data/mp/processed")
+shutil.rmtree("data/mp/processed")
 
 mp = MaterialsProject(
     "data/mp",
@@ -89,7 +89,6 @@ mp = MaterialsProject(
     in_memory=False,
     use_convex_hull=True,
 )
-exit(0)
 print(mp.phase_diagram)
 filter = SequentialFilter([FilterAtoms(excluded=[8]), FilterNumberOfAtoms(max=6)])
 
