@@ -1,5 +1,4 @@
 from __future__ import annotations
-from py import process
 
 import torch
 import torch.nn.functional as F
@@ -167,7 +166,9 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
 
     @property
     def downloaded_file(self) -> str:
-        return os.path.join(self.raw_dir, self.compressed_file)
+        if self.compressed_file is not None:
+            return os.path.join(self.raw_dir, self.compressed_file)
+        return None
 
     @property
     def raw_file(self) -> str:
@@ -258,12 +259,12 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
 
         systems = DatasetWithEnergy.Entry.inclusion_graph(entries)
 
-        for key, entries in tqdm(
+        for key, entry_lst in tqdm(
             systems.items(),
             desc="calculate convex hull",
         ):
             try:
-                hull = PhaseDiagram(entries)
+                hull = PhaseDiagram(entry_lst)
             except ValueError:
                 hull = None
 

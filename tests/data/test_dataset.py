@@ -15,6 +15,7 @@ import glob
 import urllib.request
 
 from data.utils import *
+from data.data_convex_hull import *
 
 
 @pytest.fixture(scope="package")
@@ -68,3 +69,14 @@ def test_loader(dataset_tmp_path):
         ground_truth = pickle.load(fp)
 
     compate_structures_list(structs, ground_truth)
+
+
+def test_convex_hull(dataset_tmp_path):
+    print(dataset_tmp_path, os.path.join(dataset_tmp_path, "dataset_convex_hull"))
+    root = os.path.join(dataset_tmp_path, "dataset_convex_hull")
+    write_hdf5_dataset(root)
+    print("test")
+
+    dataset = HDF5Dataset(root)
+    print("test")
+    dataset.compute_convex_hulls()
