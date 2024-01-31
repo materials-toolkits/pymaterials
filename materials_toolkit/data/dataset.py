@@ -226,11 +226,13 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
 
     def compute_convex_hulls(self, file_name: str = None):
         if file_name is None:
-            file_name = self.raw_file
+            file_name = self.processed_file
 
-        self.close()
+        if os.path.normpath(file_name) == os.path.normpath(self.processed_file):
+            self.close()
 
         file = h5py.File(file_name, "r+")
+        print("opening", file_name)
         data = HDF5GroupWrapper(file["data"])
         indexing = {key: torch.from_numpy(d[:]) for key, d in file["indexing"].items()}
         length = indexing["num_structures"].item()
@@ -284,6 +286,7 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
 
         file["data"].create_dataset("energy_above_hull", data=energies)
 
+        file.flush()
         file.close()
 
         if os.path.normpath(file_name) == os.path.normpath(self.processed_file):
@@ -410,12 +413,14 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
 
     def close(self):
         if hasattr(self, "file") and self.file:
+            print("closing", self.file.filename)
             self.file.close()
 
     def load(self):
         self.close()
 
         self.file = h5py.File(self.processed_file, "r")
+        print("opening", self.processed_file)
 
         self.indexing = {
             key: torch.from_numpy(d[:]) for key, d in self.file["indexing"].items()

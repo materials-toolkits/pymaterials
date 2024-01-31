@@ -14,8 +14,8 @@ import hashlib
 import glob
 import urllib.request
 
-from data.utils import *
-from data.data_convex_hull import *
+from .utils import *
+from .data_convex_hull import *
 
 
 @pytest.fixture(scope="package")
