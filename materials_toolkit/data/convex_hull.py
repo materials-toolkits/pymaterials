@@ -27,52 +27,44 @@ class DatasetWithEnergy(metaclass=ABCMeta):
     def compute_convex_hulls(self):
         pass
 
-    def get_key(self, z: torch.LongTensor) -> str:
-        atomic_numbers, count = z.unique(sorted=True, return_counts=True)
+    def calculate_convex_hull(self, entry: Entry = None, z: torch.LongTensor = None):
+        if entry is None:
+            entry = DatasetWithEnergy.Entry(z)
 
-        comp = Composition({z.item(): n.item() for z, n in zip(atomic_numbers, count)})
+        if entry in self.phase_diagram:
+            return self.phase_diagram[entry]
 
-        return "-".join(sorted(z.symbol for z in comp.elements))
-
-    def get_atomic_numbers(self, z: torch.LongTensor) -> torch.LongTensor:
-        return z.unique(sorted=True)
-
-    def get_composition(self, z: torch.LongTensor) -> Composition:
-        atomic_numbers, count = z.unique(sorted=True, return_counts=True)
-
-        return Composition({z.item(): n.item() for z, n in zip(atomic_numbers, count)})
-
-    def calculate_convex_hull(self, z: torch.LongTensor):
-        key = self.get_key(z)
-
-        if key in self.phase_diagram:
-            return self.phase_diagram[key]
-
-        entries = self.entries(self.get_atomic_numbers(z))
+        entries = self.entries(entry.atomic_numbers)
         try:
             diagram = PhaseDiagram(entries)
         except ValueError:
             diagram = None
 
-        self.phase_diagram[key] = diagram
+        self.phase_diagram[entry] = diagram
 
-        return self.phase_diagram[key]
+        return self.phase_diagram[entry]
 
     def _calculate_e_above_hull(
         self, z: torch.LongTensor, energy_pa: torch.FloatTensor
     ) -> torch.FloatTensor:
-        hull = self.calculate_convex_hull(z)
+        hull = self.calculate_convex_hull(z=z)
 
         if hull is None:
             return float("nan")
 
         total_energy = energy_pa.item() * z.shape[0]
 
-        entry = PDEntry(self.get_composition(z), total_energy)
+        pd_entry = PDEntry(self.get_composition(z), total_energy)
 
-        return hull.get_e_above_hull(entry)
+        return hull.get_e_above_hull(pd_entry)
 
-    def calculate_e_above_hull(self, struct: StructureData) -> torch.FloatTensor:
+    def calculate_e_above_hull(
+        self, struct: StructureData = None, entry: DatasetWithEnergy.Entry = None
+    ) -> torch.FloatTensor:
+        if entry is not None:
+            hull = self.calculate_convex_hull(entry=entry)
+            return hull.get_e_above_hull(entry.pd_entry)
+
         if struct.num_structures.item() > 1:
             energies = []
             for data in separate(struct, keys=["z", "energy_pa"]):
@@ -202,7 +194,7 @@ class DatasetWithEnergy(metaclass=ABCMeta):
         def inclusion_graph(
             cls, entries: List[DatasetWithEnergy.Entry]
         ) -> Dict[str, List[DatasetWithEnergy.Entry]]:
-            entries = sorted(entries, key=len)[: 1 << 13]
+            entries = sorted(entries, key=len)
 
             inclusion, dict_entries = {}, {}
             for entry in tqdm.tqdm(entries, desc="clusturise systems", leave=False):

@@ -242,6 +242,7 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
             return
 
         entries = []
+        s = set()
         for struct in tqdm(
             separate(
                 data,
@@ -255,6 +256,7 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
             leave=False,
         ):
             entry = DatasetWithEnergy.Entry(struct.z, struct.energy_pa)
+            s.add(entry.key)
             entries.append(entry)
 
         systems = DatasetWithEnergy.Entry.inclusion_graph(entries)
@@ -271,11 +273,15 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
             self.phase_diagram[key] = hull
 
         e_above_hull = []
+        print(list(self.phase_diagram.keys()))
+        print(list(systems.keys()))
+        print(list(s))
         for entry in tqdm(
             entries,
             desc="calculate energy above hull",
         ):
-            energy = self.calculate_e_above_hull(entry)
+            print(entry)
+            energy = self.calculate_e_above_hull(entry=entry)
             e_above_hull.append(energy)
 
         energies = torch.tensor(
