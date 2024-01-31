@@ -459,7 +459,6 @@ def write_hdf5_dataset(path: str):
         structs.append(struct)
 
     HDF5Dataset.create_dataset(os.path.join(path, "raw"), structs)
-    HDF5Dataset.create_dataset(os.path.join(path, "processed"), structs)
 
 
 def get_e_above_hull():

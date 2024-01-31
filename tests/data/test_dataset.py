@@ -72,11 +72,29 @@ def test_loader(dataset_tmp_path):
 
 
 def test_convex_hull(dataset_tmp_path):
-    print(dataset_tmp_path, os.path.join(dataset_tmp_path, "dataset_convex_hull"))
     root = os.path.join(dataset_tmp_path, "dataset_convex_hull")
     write_hdf5_dataset(root)
-    print("test")
+
+    dataset = HDF5Dataset(root, use_convex_hull=True)
+
+    data = dataset.get(None, keys=["energy_above_hull"])
+
+    calculated_e_above_hull = data.energy_above_hull
+    real_e_above_hull = get_e_above_hull()
+
+    assert (real_e_above_hull - calculated_e_above_hull).abs().max() < 5e-3
+
+
+def test_convex_hull_after_preprocess(dataset_tmp_path):
+    root = os.path.join(dataset_tmp_path, "dataset_convex_hull_after_preprocess")
+    write_hdf5_dataset(root)
 
     dataset = HDF5Dataset(root)
-    print("test")
     dataset.compute_convex_hulls()
+
+    data = dataset.get(None, keys=["energy_above_hull"])
+
+    calculated_e_above_hull = data.energy_above_hull
+    real_e_above_hull = get_e_above_hull()
+
+    assert (real_e_above_hull - calculated_e_above_hull).abs().max() < 5e-3

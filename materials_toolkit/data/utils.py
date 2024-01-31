@@ -33,6 +33,7 @@ def uncompress_progress(
     file: str,
     member: str,
     path: Optional[str] = "",
+    error_on_fail: bool = True,
     **kwargs,
 ):
     if tarfile.is_tarfile(file):
@@ -54,7 +55,7 @@ def uncompress_progress(
         ) as f:
             f.extract(member, path=path)
 
-    else:
+    elif error_on_fail:
         raise Exception(f"file could not be opened")
 
 

@@ -11,6 +11,7 @@ from tqdm.contrib.concurrent import process_map, thread_map
 
 from typing import Iterable, Iterator, List, Tuple, Any, Optional, Union, Callable, Dict
 import os
+import shutil
 import json
 import hashlib
 import warnings
@@ -142,16 +143,7 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
             **kwargs,
         )
 
-        file = h5py.File(self.processed_file, "r")
-
-        self.indexing = {
-            key: torch.from_numpy(d[:]) for key, d in file["indexing"].items()
-        }
-
-        self.data_hdf5 = HDF5GroupWrapper(file["data"], self.in_memory)
-
-        if self.in_memory:
-            self.data_hdf5.load_all()
+        self.load()
 
     @property
     def raw_file_names(self) -> List[str]:
@@ -232,8 +224,13 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
                 "md5 of the downloaded file doesn't match with the expected md5"
             )
 
-    def compute_convex_hulls(self):
-        file = h5py.File(self.raw_file, "r+")
+    def compute_convex_hulls(self, file_name: str = None):
+        if file_name is None:
+            file_name = self.raw_file
+
+        self.close()
+
+        file = h5py.File(file_name, "r+")
         data = HDF5GroupWrapper(file["data"])
         indexing = {key: torch.from_numpy(d[:]) for key, d in file["indexing"].items()}
         length = indexing["num_structures"].item()
@@ -273,24 +270,24 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
             self.phase_diagram[key] = hull
 
         e_above_hull = []
-        print(list(self.phase_diagram.keys()))
-        print(list(systems.keys()))
-        print(list(s))
+
         for entry in tqdm(
             entries,
             desc="calculate energy above hull",
         ):
-            print(entry)
             energy = self.calculate_e_above_hull(entry=entry)
             e_above_hull.append(energy)
 
         energies = torch.tensor(
-            e_above_hull, dtype=self.baching["energy_above_hull"].dtype
+            e_above_hull, dtype=self.data_class.batching["energy_above_hull"].dtype
         )
 
         file["data"].create_dataset("energy_above_hull", data=energies)
 
         file.close()
+
+        if os.path.normpath(file_name) == os.path.normpath(self.processed_file):
+            self.load()
 
     @classmethod
     def create_dataset(
@@ -321,25 +318,31 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
         file.flush()
         file.close()
 
+    def _unzip_if_needed(self):
+        unzipped = os.path.exists(self.raw_file)
+        existing_zipped = self.downloaded_file is not None and os.path.exists(
+            self.downloaded_file
+        )
+
+        if (not unzipped) and existing_zipped:
+            uncompress_progress(
+                self.downloaded_file,
+                self.data_file,
+                self.raw_dir,
+                desc=f"unpack {self.compressed_file}",
+            )
+
     def process(self):
+        self._unzip_if_needed()
+
+        if self.use_convex_hull:
+            self.compute_convex_hulls(self.raw_file)
+
         preprocessing = (self.pre_transform is not None) or (
             self.pre_filter is not None
         )
 
-        dst = self.raw_dir if preprocessing else self.processed_dir
-        if not os.path.exists(os.path.join(dst, self.data_file)):
-            uncompress_progress(
-                self.downloaded_file,
-                self.data_file,
-                dst,
-                desc=f"unpack {self.compressed_file}",
-            )
-
         if preprocessing:
-            if self.use_convex_hull:
-                self.compute_convex_hulls()
-
-            return
             raise NotImplementedError("preprocessing is not implemented yet")
             raw_data = h5py.File(self.raw_file, "r")
 
@@ -387,19 +390,41 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
                 self.processed_dir, processed_dataset, data_file=self.data_file
             )
 
+        if not os.path.exists(self.processed_file):
+            shutil.copyfile(self.raw_file, self.processed_file)
+
     def len(self) -> int:
         r"""Returns the number of data objects stored in the dataset."""
         return self.indexing["num_structures"].item()
 
-    def get(self, idx: int | torch.LongTensor) -> StructureData:
+    def get(self, idx: int | torch.LongTensor, keys: List[str] = None) -> StructureData:
         r"""Gets the data object at index :obj:`idx`."""
         return separate(
             self.data_hdf5,
-            idx,
+            idx=idx,
             cls=self.data_class,
             indexing=self.indexing,
             to_list=False,
+            keys=keys,
         ).set_dataset(self)
 
     def close(self):
-        self.data_hdf5.close()
+        if hasattr(self, "file") and self.file:
+            self.file.close()
+
+    def load(self):
+        self.close()
+
+        self.file = h5py.File(self.processed_file, "r")
+
+        self.indexing = {
+            key: torch.from_numpy(d[:]) for key, d in self.file["indexing"].items()
+        }
+
+        self.data_hdf5 = HDF5GroupWrapper(self.file["data"], self.in_memory)
+
+        if self.in_memory:
+            self.data_hdf5.load_all()
+
+    def __del__(self):
+        self.close()
