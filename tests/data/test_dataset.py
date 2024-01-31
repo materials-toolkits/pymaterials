@@ -13,6 +13,7 @@ import multiprocessing as mp
 import hashlib
 import glob
 import urllib.request
+import shutil
 
 from .utils import *
 from .data_convex_hull import *
@@ -53,9 +54,69 @@ def test_download(dataset_tmp_path):
     compate_structures_list(dataset, ground_truth)
 
 
-@pytest.mark.dependency(depends=["test_download"])
+def test_unzip_without_download(dataset_tmp_path):
+    origin = os.path.join(dataset_tmp_path, "test-data.tar.gz")
+    root = os.path.join(dataset_tmp_path, "data/unzip_without_download")
+    dst = os.path.join(root, "raw/test-data.tar.gz")
+    print(os.system("tree " + str(dataset_tmp_path)))
+
+    os.makedirs(os.path.split(dst)[0])
+    shutil.copyfile(origin, dst)
+
+    with no_proxy(), http_test_data(dataset_tmp_path):
+        dataset = HDF5Dataset(
+            root=root,
+            url="http://127.0.0.1:8000/test-data.do-not-exist.tar.gz",
+            md5=get_md5_hash(os.path.join(dataset_tmp_path, "test-data.tar.gz")),
+        )
+
+    with open(os.path.join(dataset_tmp_path, "ground-truth.pickle"), "rb") as fp:
+        ground_truth = pickle.load(fp)
+
+    compate_structures_list(dataset, ground_truth)
+
+
+def test_without_unzip(dataset_tmp_path):
+    origin = os.path.join(dataset_tmp_path, "test-data/data.hdf5")
+    root = os.path.join(dataset_tmp_path, "data/test_without_unzip")
+    dst = os.path.join(root, "raw/data.hdf5")
+
+    os.makedirs(os.path.split(dst)[0])
+    shutil.copyfile(origin, dst)
+
+    dataset = HDF5Dataset(root=root)
+
+    with open(os.path.join(dataset_tmp_path, "ground-truth.pickle"), "rb") as fp:
+        ground_truth = pickle.load(fp)
+
+    compate_structures_list(dataset, ground_truth)
+
+
+def test_processed(dataset_tmp_path):
+    origin = os.path.join(dataset_tmp_path, "test-data/data.hdf5")
+    root = os.path.join(dataset_tmp_path, "data/processed")
+    dst = os.path.join(root, "processed/data.hdf5")
+
+    os.makedirs(os.path.split(dst)[0])
+    shutil.copyfile(origin, dst)
+
+    dataset = HDF5Dataset(root=root)
+
+    with open(os.path.join(dataset_tmp_path, "ground-truth.pickle"), "rb") as fp:
+        ground_truth = pickle.load(fp)
+
+    compate_structures_list(dataset, ground_truth)
+
+
 def test_loader(dataset_tmp_path):
-    dataset = HDF5Dataset(os.path.join(dataset_tmp_path, "data/test-data"))
+    origin = os.path.join(dataset_tmp_path, "test-data/data.hdf5")
+    root = os.path.join(dataset_tmp_path, "data/processed")
+    dst = os.path.join(root, "processed/data.hdf5")
+
+    os.makedirs(os.path.split(dst)[0])
+    shutil.copyfile(origin, dst)
+
+    dataset = HDF5Dataset(root)
 
     assert len(dataset) == 128
 
