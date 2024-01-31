@@ -110,7 +110,7 @@ def test_processed(dataset_tmp_path):
 
 def test_loader(dataset_tmp_path):
     origin = os.path.join(dataset_tmp_path, "test-data/data.hdf5")
-    root = os.path.join(dataset_tmp_path, "data/processed")
+    root = os.path.join(dataset_tmp_path, "data/test-loader")
     dst = os.path.join(root, "processed/data.hdf5")
 
     os.makedirs(os.path.split(dst)[0])
