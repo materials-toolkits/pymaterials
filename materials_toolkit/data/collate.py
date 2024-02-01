@@ -4,30 +4,36 @@ from torch_scatter import scatter_add
 
 from materials_toolkit.data.base import Batching, StructureData
 
-from typing import Iterable, List, Tuple, Dict, Mapping, Callable, Optional
+from typing import Iterable, Iterator, List, Tuple, Dict, Mapping, Callable, Optional
+from abc import ABCMeta, abstractmethod, abstractproperty
 
 
-class SelectableTensor:
-    def __init__(self):
-        raise NotImplementedError("This class is an interface")
-
+class SelectableTensor(metaclass=ABCMeta):
+    @abstractmethod
     def __getitem__(self, args: int | torch.LongTensor | tuple) -> torch.Tensor:
         pass
 
+    @abstractmethod
     def index_select(self, dim: int, index: torch.LongTensor) -> torch.Tensor:
         pass
 
-    @property
+    @abstractproperty
     def shape(self) -> tuple:
         pass
 
 
 class SelectableTensorMaping(Mapping[str, SelectableTensor]):
-    def __init__(self):
-        raise NotImplementedError("This class is an interface")
-
+    @abstractmethod
     def __getitem__(self, key: str) -> SelectableTensor:
         pass
+
+    @abstractmethod
+    def __iter__(self) -> Iterator[str]:
+        pass
+
+    @abstractmethod
+    def __len__(self) -> int:
+        return super().__len__()
 
 
 def get_indexing(
