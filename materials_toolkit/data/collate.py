@@ -46,31 +46,51 @@ def get_indexing(
 
     indexing = {}
 
+    if "num_structures" in batch:
+        indexing["num_structures"] = batch["num_structures"]
+        assert isinstance(indexing["num_structures"], torch.LongTensor)
+        assert indexing["num_structures"].shape == (1,)
+
     if isinstance(batch.keys, Iterable):
         keys = batch.keys
     else:
         keys = batch.keys()
 
     for key in keys:
+        if key == "num_structures":
+            continue
+
         cat_dim = batching[key].cat_dim
         cat_shape = batching[key].shape[cat_dim]
 
         for index in (cat_shape, batching[key].inc):
             if isinstance(index, str) and (index not in indexing):
-                indexing[index] = F.pad(getattr(batch, index).cumsum(dim=0), (1, 0))
+                indexing[index] = F.pad(batch[index].cumsum(dim=0), (1, 0))
 
-        if ("num_structures" not in indexing) and isinstance(cat_shape, int):
-            indexing["num_structures"] = torch.tensor(
-                [batch[key].shape[cat_dim] // cat_shape], dtype=torch.long
-            )
+        if isinstance(cat_shape, int):
+            if "num_structures" not in indexing:
+                indexing["num_structures"] = torch.tensor(
+                    [batch[key].shape[cat_dim] // cat_shape], dtype=torch.long
+                )
+            else:
+                assert indexing["num_structures"].item() == (
+                    batch[key].shape[cat_dim] // cat_shape
+                ), f"{key} {indexing['num_structures'].item()} {batch[key].shape[cat_dim] // cat_shape} {batch[key].shape[cat_dim]} {batch[key].shape} {cat_dim} {cat_shape}"
 
     return indexing
 
 
 def _collate_key(
-    key: str, data_args: Dict[str, torch.Tensor], batching: Dict[str, Batching], incs={}
+    key: str,
+    data_args: Dict[str, torch.Tensor | List[torch.Tensor]],
+    batching: Dict[str, Batching],
+    incs={},
 ) -> torch.Tensor:
     if isinstance(data_args[key], torch.Tensor):
+        return data_args[key]
+
+    if key == "num_structures":
+        data_args[key] = torch.tensor([sum(data_args[key])], dtype=torch.long)
         return data_args[key]
 
     cat_dim = batching[key].cat_dim
@@ -84,6 +104,7 @@ def _collate_key(
     size = shape[cat_dim]
 
     if isinstance(size, str):
+        print("add", size)
         size = _collate_key(size, data_args, batching, incs)
 
     if inc != 0:
@@ -92,6 +113,7 @@ def _collate_key(
         else:
             if isinstance(inc, str):
                 dim = batching[inc].cat_dim
+                print("add", inc)
                 calc_inc = F.pad(
                     _collate_key(inc, data_args, batching, incs).cumsum(dim=dim)[:-1],
                     (1, 0),
@@ -113,11 +135,48 @@ def _collate_key(
     return data
 
 
-def collate(structures: List[StructureData]) -> StructureData:
-    cls = structures[0].__class__
-    batching = cls.batching
+def _include_dependancies_in_keys(
+    keys: Iterable[str], batching: Dict[str, Batching]
+) -> List[str]:
+    keys_with_deps = set()
 
-    keys = set.union(*(set(struct.keys) for struct in structures))
+    for key in keys:
+        if key not in batching:
+            continue
+
+        keys_with_deps.add(key)
+
+        inc = batching[key].inc
+        if isinstance(inc, str):
+            keys_with_deps.add(inc)
+
+        dim_size = batching[key].shape[batching[key].cat_dim]
+        if isinstance(dim_size, str):
+            keys_with_deps.add(dim_size)
+
+    print("from", keys, "to", list(keys_with_deps))
+    return list(keys_with_deps)
+
+
+def collate(
+    structures: List[StructureData],
+    cls: type = None,
+    batching: Dict[str, Batching] = None,
+    keys: Iterable[str] = None,
+) -> StructureData:
+    assert len(structures) > 0
+
+    if cls is None:
+        cls = structures[0].__class__
+
+    if batching is None:
+        batching = cls.batching
+
+    if keys is None:
+        keys = set.union(*(set(struct.keys) for struct in structures))
+
+    keys = _include_dependancies_in_keys(keys, batching)
+
     data_args = {key: [] for key in keys}
 
     for struct in structures:
@@ -139,6 +198,9 @@ def _select_indexing(
 ):
     keys_indexing = set()
     for key in keys:
+        if key not in batching:
+            continue
+
         cat_dim = batching[key].cat_dim
         cat_index = batching[key].shape[cat_dim]
 
@@ -178,6 +240,9 @@ def _select_and_decrement(
     result = {}
 
     for key in keys:
+        if key not in batching:
+            continue
+
         inc = batching[key].inc
         cat_dim = batching[key].cat_dim
         cat_index = batching[key].shape[cat_dim]
@@ -194,7 +259,6 @@ def _select_and_decrement(
 
         if inc != 0:
             if isinstance(inc, str):
-                print("dec", key, inc, indexing[inc])
                 offset = indexing[inc]
             else:
                 offset = inc * idx
@@ -226,6 +290,9 @@ def _to_generator(
         kwargs = {}
 
         for key in data.keys():
+            if key not in batching:
+                continue
+
             cat_dim = batching[key].cat_dim
             cat_index = batching[key].shape[cat_dim]
 
@@ -248,7 +315,7 @@ def separate(
     to_list: bool = True,
     to_iterator: bool = False,
     keys: Iterable[str] = None,
-) -> List[StructureData] | StructureData:
+) -> List[StructureData]:
     if cls is None:
         cls = batch.__class__
 
@@ -275,10 +342,10 @@ def separate(
 
     data = _select_and_decrement(batch, keys, batching, idx, indexing, selecting_index)
 
-    if to_list:
-        return list(_to_generator(cls, data, idx, batching, selected_index))
-
     if to_iterator:
         return _to_generator(cls, data, idx, batching, selected_index)
+
+    if to_list:
+        return list(_to_generator(cls, data, idx, batching, selected_index))
 
     return cls(**data)

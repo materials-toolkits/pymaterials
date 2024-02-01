@@ -86,7 +86,9 @@ class Batching:
             raise KeyError
 
 
-def batching(**config: Dict[str, Batching]) -> Callable[[type], type]:
+def batching(
+    reset: bool = False, **config: Dict[str, Batching]
+) -> Callable[[type], type]:
     """
     A decoration to define how :class:`StructureData` objects are collated into a batch.
 
@@ -118,13 +120,26 @@ def batching(**config: Dict[str, Batching]) -> Callable[[type], type]:
             value.inc in config and config[value.inc].shape == (1,)
         )
 
-    @functools.wraps(config)
-    def fn(cls):
-        assert StructureData in cls.__bases__
-        cls.batching = cls.batching.copy()
-        cls.batching.update(config)
+    assert (
+        "num_structures" not in config
+    ), "Configuration of num_structures can't be override."
 
-        return cls
+    if reset:
+
+        def fn(cls):
+            assert StructureData in cls.__bases__
+            cls.batching = config
+
+            return cls
+
+    else:
+
+        def fn(cls):
+            assert StructureData in cls.__bases__
+            cls.batching = cls.batching.copy()
+            cls.batching.update(config)
+
+            return cls
 
     return fn
 
@@ -268,7 +283,19 @@ class StructureData(torch_geometric.data.Data):
         dataset: Dataset = None,
         **kwargs,
     ):
-        periodic = self._default_periodic(periodic, cell)
+        num_structures = self._get_num_structures(
+            z=z,
+            pos=pos,
+            cell=cell,
+            y=y,
+            edge_index=edge_index,
+            target_cell=target_cell,
+            triplet_index=triplet_index,
+            quadruplet_index=quadruplet_index,
+            periodic=periodic,
+            **kwargs,
+        )
+        periodic = self._default_periodic(num_structures, periodic, cell)
 
         self._merge_kwargs(
             kwargs,
@@ -289,12 +316,8 @@ class StructureData(torch_geometric.data.Data):
 
         super().__init__(**kwargs)
 
-        self._num_structures = torch.tensor([periodic.shape[0]])
+        self.num_structures = torch.tensor([num_structures], dtype=torch.long)
         self._dataset = dataset
-
-    @property
-    def num_structures(self) -> int:
-        return self._num_structures
 
     def set_dataset(self, dataset: Dataset):
         self._dataset = dataset
@@ -395,6 +418,9 @@ class StructureData(torch_geometric.data.Data):
             if batching is None:
                 continue
 
+            if name not in cls.batching:
+                continue
+
             if cls.batching[name].shape is None:
                 continue
 
@@ -450,12 +476,38 @@ class StructureData(torch_geometric.data.Data):
                         size, fill_value=batching.default, dtype=batching.dtype
                     )
 
+    def _get_num_structures(self, **data):
+        if "num_structures" in data:
+            return int(data["num_structures"])
+
+        not_empty = False
+        for key, tensor in data.items():
+            if tensor is None or key not in self.batching:
+                continue
+
+            not_empty = True
+
+            cat_dim = self.batching[key].cat_dim
+            cat_size = self.batching[key].shape[cat_dim]
+
+            if isinstance(cat_size, int):
+                return int(tensor.shape[cat_dim] // cat_size)
+
+        if not_empty:
+            return 1
+
+        return 0
+
     @classmethod
     def _default_periodic(
         cls,
+        num_structures: int,
         periodic: Union[bool, torch.BoolTensor] = None,
         cell: torch.FloatTensor = None,
     ) -> torch.BoolTensor:
+        if "periodic" not in cls.batching:
+            return
+
         if periodic is None:
             periodic = cell is not None
 
@@ -466,6 +518,6 @@ class StructureData(torch_geometric.data.Data):
         )
 
         if isinstance(periodic, bool):
-            periodic = torch.tensor(periodic)
+            periodic = torch.tensor([periodic] * num_structures)
 
         return periodic.flatten()
