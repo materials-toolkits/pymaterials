@@ -165,7 +165,7 @@ def test_collate():
     for key in batch_ground_truth.keys():
         assert (batch[key] - batch_ground_truth[key]).abs().max() < 1e-6
 
-    keys = ["scalar", "index_vector_element", "index_size", "vector_size"]
+    keys = ["scalar", "index_vector_element", "index_size", "struct_idx", "vector_size"]
     batch = collate(custom_structures, keys=["scalar", "index_vector_element"])
 
     assert set(batch.keys) == set(keys + ["num_structures"])
@@ -173,15 +173,15 @@ def test_collate():
     for key in keys:
         assert (batch[key] - batch_ground_truth[key]).abs().max() < 1e-6
 
-    keys = ["matrix", "variable_size_vector", "vector_size"]
+    keys = ["matrix", "variable_size_vector", "struct_idx", "vector_size"]
     batch = collate(custom_structures, keys=["matrix", "variable_size_vector"])
-
-    print(batch.struct_idx)
 
     assert set(batch.keys) == set(keys + ["num_structures"]), f"{batch.keys}"
 
     for key in keys:
-        assert (batch[key] - batch_ground_truth[key]).abs().max() < 1e-6
+        assert (
+            batch[key] - batch_ground_truth[key]
+        ).abs().max() < 1e-6, f"{batch[key]} {batch_ground_truth[key]}"
 
 
 def compare_structure_list(a: List[StructureData], b: List[StructureData]):
@@ -192,7 +192,6 @@ def compare_structure_list(a: List[StructureData], b: List[StructureData]):
 
 
 def test_separate():
-    return
     # to list of struct
     structures = separate(custom_batch)
     compare_structure_list(custom_structures, structures)
@@ -210,37 +209,23 @@ def test_separate():
     compare_structure_list(custom_structures[1::2], structures)
 
     # to iterator
-    structures = list(separate(custom_batch, to_iterator=True))
+    structures = list(separate(custom_batch, result="iterator"))
     compare_structure_list(custom_structures, structures)
 
     structures = list(
-        separate(custom_batch, idx=torch.tensor([0, 1, 2]), to_iterator=True)
+        separate(custom_batch, idx=torch.tensor([0, 1, 2]), result="iterator")
     )
     compare_structure_list(custom_structures, structures)
 
     structures = list(
-        separate(custom_batch, idx=torch.tensor([0, 2]), to_iterator=True)
+        separate(custom_batch, idx=torch.tensor([0, 2]), result="iterator")
     )
     compare_structure_list(custom_structures[::2], structures)
 
-    structures = list(separate(custom_batch, idx=torch.tensor([1]), to_iterator=True))
+    structures = list(separate(custom_batch, idx=torch.tensor([1]), result="iterator"))
     compare_structure_list(custom_structures[1::2], structures)
 
-    structures = list(separate(custom_batch, idx=1, to_iterator=True))
+    structures = list(separate(custom_batch, idx=1, result="iterator"))
     compare_structure_list(custom_structures[1::2], structures)
 
     # to batch
-    structures = separate(custom_batch, to_list=False)
-    compare_structure_list([collate(custom_structures)], structures)
-
-    structures = separate(custom_batch, idx=torch.tensor([0, 1, 2]))
-    compare_structure_list([collate(custom_structures)], structures)
-
-    structures = separate(custom_batch, idx=torch.tensor([0, 2]))
-    compare_structure_list([collate(custom_structures[::2])], structures)
-
-    structures = separate(custom_batch, idx=torch.tensor([1]))
-    compare_structure_list([collate(custom_structures[1::2])], structures)
-
-    structures = separate(custom_batch, idx=1)
-    compare_structure_list([collate(custom_structures[1::2])], structures)

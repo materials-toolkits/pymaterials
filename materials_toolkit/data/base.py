@@ -158,7 +158,7 @@ class StructureData(torch_geometric.data.Data):
     ...                         [-0.7575408, 0.58707964, 0.0],
     ...                         [0.7575408, 0.58707964, 0.0]])
     ... )
-    StructureData(pos=[3, 3], z=[3], periodic=[1], num_atoms=[1], batch_atoms=[3], num_edges=[1], batch_edges=[0])
+    StructureData(pos=[3, 3], z=[3], periodic=[1], num_atoms=[1], batch_atoms=[3], num_edges=[1], batch_edges=[0], num_structures=[1])
 
     * Water molecule with bondsd
 
@@ -166,7 +166,7 @@ class StructureData(torch_geometric.data.Data):
     ...     z = torch.tensor([8, 1, 1],dtype=torch.long),
     ...     edge_index = torch.tensor([[0, 0], [1, 2]],dtype=torch.long)
     ... )
-    StructureData(edge_index=[2, 2], z=[3], periodic=[1], num_atoms=[1], batch_atoms=[3], num_edges=[1], batch_edges=[2])
+    StructureData(edge_index=[2, 2], z=[3], periodic=[1], num_atoms=[1], batch_atoms=[3], num_edges=[1], batch_edges=[2], num_structures=[1])
 
     * Peroveskite in 3D
 
@@ -181,7 +181,7 @@ class StructureData(torch_geometric.data.Data):
     ...                           [0.0, 3.867, 0.0],
     ...                           [0.0, 0.0, 3.867]]])
     ... )
-    StructureData(pos=[5, 3], z=[5], cell=[1, 3, 3], periodic=[1], num_atoms=[1], batch_atoms=[5], num_edges=[1], batch_edges=[0])
+    StructureData(pos=[5, 3], z=[5], cell=[1, 3, 3], periodic=[1], num_atoms=[1], batch_atoms=[5], num_edges=[1], batch_edges=[0], num_structures=[1])
 
     * Crystal with an associated graph
 
@@ -209,7 +209,7 @@ class StructureData(torch_geometric.data.Data):
     ...                                 [0, 0, 1],
     ...                                 [0, 0,-1]], dtype=torch.long)
     ... )
-    StructureData(edge_index=[2, 14], pos=[2, 3], z=[2], cell=[1, 3, 3], target_cell=[14, 3], periodic=[1], num_atoms=[1], batch_atoms=[2], num_edges=[1], batch_edges=[14])
+    StructureData(edge_index=[2, 14], pos=[2, 3], z=[2], cell=[1, 3, 3], target_cell=[14, 3], periodic=[1], num_atoms=[1], batch_atoms=[2], num_edges=[1], batch_edges=[14], num_structures=[1])
 
     Parameters
     ----------

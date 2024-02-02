@@ -213,6 +213,10 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
         if self.url is None:
             return
 
+        print("compressed_file", self.compressed_file)
+        if os.path.exists(self.compressed_file):
+            return False
+
         download_progress(
             self.url, self.downloaded_file, desc=f"downloading {self.compressed_file}"
         )
@@ -232,7 +236,6 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
             self.close()
 
         file = h5py.File(file_name, "r+")
-        print("opening", file_name)
         data = HDF5GroupWrapper(file["data"])
         indexing = {key: torch.from_numpy(d[:]) for key, d in file["indexing"].items()}
         length = indexing["num_structures"].item()
@@ -247,7 +250,7 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
                 data,
                 cls=self.data_class,
                 indexing=indexing,
-                to_iterator=True,
+                result="iterator",
                 keys=["z", "energy_pa"],
             ),
             total=length,
@@ -402,25 +405,24 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
 
     def get(self, idx: int | torch.LongTensor, keys: List[str] = None) -> StructureData:
         r"""Gets the data object at index :obj:`idx`."""
+
         return separate(
             self.data_hdf5,
             idx=idx,
             cls=self.data_class,
             indexing=self.indexing,
-            to_list=False,
+            result="batch",
             keys=keys,
         ).set_dataset(self)
 
     def close(self):
         if hasattr(self, "file") and self.file:
-            print("closing", self.file.filename)
             self.file.close()
 
     def load(self):
         self.close()
 
         self.file = h5py.File(self.processed_file, "r")
-        print("opening", self.processed_file)
 
         self.indexing = {
             key: torch.from_numpy(d[:]) for key, d in self.file["indexing"].items()

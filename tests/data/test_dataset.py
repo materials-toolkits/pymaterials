@@ -58,7 +58,6 @@ def test_unzip_without_download(dataset_tmp_path):
     origin = os.path.join(dataset_tmp_path, "test-data.tar.gz")
     root = os.path.join(dataset_tmp_path, "data/unzip_without_download")
     dst = os.path.join(root, "raw/test-data.tar.gz")
-    print(os.system("tree " + str(dataset_tmp_path)))
 
     os.makedirs(os.path.split(dst)[0])
     shutil.copyfile(origin, dst)
@@ -66,7 +65,7 @@ def test_unzip_without_download(dataset_tmp_path):
     with no_proxy(), http_test_data(dataset_tmp_path):
         dataset = HDF5Dataset(
             root=root,
-            url="http://127.0.0.1:8000/test-data.do-not-exist.tar.gz",
+            url="http://127.0.0.1:8000/path-does-not-exist/test-data.tar.gz",
             md5=get_md5_hash(os.path.join(dataset_tmp_path, "test-data.tar.gz")),
         )
 

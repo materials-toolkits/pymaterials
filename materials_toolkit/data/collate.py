@@ -4,7 +4,17 @@ from torch_scatter import scatter_add
 
 from materials_toolkit.data.base import Batching, StructureData
 
-from typing import Iterable, Iterator, List, Tuple, Dict, Mapping, Callable, Optional
+from typing import (
+    Iterable,
+    Iterator,
+    List,
+    Literal,
+    Tuple,
+    Dict,
+    Mapping,
+    Callable,
+    Optional,
+)
 from abc import ABCMeta, abstractmethod, abstractproperty
 
 
@@ -104,7 +114,6 @@ def _collate_key(
     size = shape[cat_dim]
 
     if isinstance(size, str):
-        print("add", size)
         size = _collate_key(size, data_args, batching, incs)
 
     if inc != 0:
@@ -113,7 +122,6 @@ def _collate_key(
         else:
             if isinstance(inc, str):
                 dim = batching[inc].cat_dim
-                print("add", inc)
                 calc_inc = F.pad(
                     _collate_key(inc, data_args, batching, incs).cumsum(dim=dim)[:-1],
                     (1, 0),
@@ -136,7 +144,7 @@ def _collate_key(
 
 
 def _include_dependancies_in_keys(
-    keys: Iterable[str], batching: Dict[str, Batching]
+    keys: Iterable[str], existing_keys: Iterable[str], batching: Dict[str, Batching]
 ) -> List[str]:
     keys_with_deps = set()
 
@@ -154,7 +162,13 @@ def _include_dependancies_in_keys(
         if isinstance(dim_size, str):
             keys_with_deps.add(dim_size)
 
-    print("from", keys, "to", list(keys_with_deps))
+    for key in existing_keys:
+        if key not in batching:
+            continue
+
+        if batching[key].default is not None:
+            keys_with_deps.add(key)
+
     return list(keys_with_deps)
 
 
@@ -172,10 +186,11 @@ def collate(
     if batching is None:
         batching = cls.batching
 
+    existing_keys = set.union(*(set(struct.keys) for struct in structures))
     if keys is None:
-        keys = set.union(*(set(struct.keys) for struct in structures))
+        keys = existing_keys
 
-    keys = _include_dependancies_in_keys(keys, batching)
+    keys = _include_dependancies_in_keys(keys, existing_keys, batching)
 
     data_args = {key: [] for key in keys}
 
@@ -236,6 +251,7 @@ def _select_and_decrement(
     idx: torch.LongTensor,
     indexing: Dict[str, torch.LongTensor],
     select_indexing: Optional[Dict[str, torch.LongTensor]] = None,
+    indexing_dst: Optional[Dict[str, torch.LongTensor]] = None,
 ) -> Dict[str, torch.LongTensor]:
     result = {}
 
@@ -257,9 +273,11 @@ def _select_and_decrement(
             current_idx = select_indexing[cat_index]
             data = batch[key].index_select(cat_dim, current_idx)
 
+        # TODO: skip when idx is None
+
         if inc != 0:
             if isinstance(inc, str):
-                offset = indexing[inc]
+                offset = indexing[inc][idx]
             else:
                 offset = inc * idx
 
@@ -267,16 +285,30 @@ def _select_and_decrement(
             index = torch.arange(size.shape[0], dtype=torch.long).repeat_interleave(
                 size
             )
-            # index = indexing[cat_index][idx].repeat_interleave(size)
 
             selection = tuple(
                 None if i != cat_dim else index for i, _ in enumerate(data.shape)
             )
             data -= offset[selection]
 
+            if indexing_dst is not None:
+                pass  # TODO inc dest tensor
+
         result[key] = data
 
     return result
+
+
+def _destination_indexing(
+    idx: torch.LongTensor, indexing: Dict[str, torch.LongTensor]
+) -> Dict[str, torch.LongTensor]:
+    selected = {}
+
+    for key, index in indexing.items():
+        size = index[idx + 1] - index[idx]
+        selected[key] = F.pad(torch.cumsum(size, 0), (1, 0))
+
+    return selected
 
 
 def _to_generator(
@@ -312,8 +344,7 @@ def separate(
     idx: int | torch.LongTensor = None,
     cls: type = None,
     indexing: Dict[str, torch.LongTensor] = None,
-    to_list: bool = True,
-    to_iterator: bool = False,
+    result: Literal["list", "iterator", "batch"] = "list",
     keys: Iterable[str] = None,
 ) -> List[StructureData]:
     if cls is None:
@@ -331,6 +362,9 @@ def separate(
         else:
             keys = batch.keys
 
+    if idx is None and result == "batch":
+        raise NotImplementedError("feature not implemented yet")  # TODO
+
     if idx is not None:
         if isinstance(idx, int):
             idx = torch.tensor([idx], dtype=torch.long)
@@ -340,12 +374,18 @@ def separate(
 
     selecting_index, selected_index = _select_indexing(idx, keys, batching, indexing)
 
-    data = _select_and_decrement(batch, keys, batching, idx, indexing, selecting_index)
+    if result == "batch":
+        indexing_dst = _destination_indexing(idx, indexing)
+    else:
+        indexing_dst = None
 
-    if to_iterator:
+    data = _select_and_decrement(
+        batch, keys, batching, idx, indexing, selecting_index, indexing_dst=indexing_dst
+    )
+
+    if result == "iterator":
         return _to_generator(cls, data, idx, batching, selected_index)
-
-    if to_list:
+    elif result == "list":
         return list(_to_generator(cls, data, idx, batching, selected_index))
 
     return cls(**data)
