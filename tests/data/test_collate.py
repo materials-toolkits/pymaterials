@@ -229,11 +229,17 @@ def test_separate():
     compare_structure_list(custom_structures[1::2], structures)
 
     # to batch
-    # structures = list(separate(custom_batch, result="batch"))
-    # compare_structure_list(collate(custom_structures), structures)
+    structures = separate(custom_batch, result="batch")
+    compare_structure_list([collate(custom_structures)], [structures])
 
     structures = separate(custom_batch, idx=torch.tensor([0, 1, 2]), result="batch")
     compare_structure_list([collate(custom_structures)], [structures])
 
     structures = separate(custom_batch, idx=torch.tensor([0, 2]), result="batch")
     compare_structure_list([collate(custom_structures[::2])], [structures])
+
+    structures = separate(custom_batch, idx=torch.tensor([1]), result="batch")
+    compare_structure_list([collate(custom_structures[1::2])], [structures])
+
+    structures = separate(custom_batch, idx=1, result="batch")
+    compare_structure_list([collate(custom_structures[1::2])], [structures])

@@ -277,23 +277,28 @@ def _select_and_decrement(
             data = batch[key].index_select(cat_dim, current_idx)
 
         if inc != 0:
-            if isinstance(inc, str):
-                offset = indexing[inc][idx]
-            else:
-                offset = inc * idx
+            offset = None
 
-            size = indexing[cat_index][idx + 1] - indexing[cat_index][idx]
-            index = torch.arange(size.shape[0], dtype=torch.long).repeat_interleave(
-                size
-            )
+            if indexing is not None:
+                if isinstance(inc, str):
+                    offset = -indexing[inc][idx]
+                    if indexing_dst is not None:
+                        offset += indexing_dst[inc][: offset.shape[0]]
+                else:
+                    offset = -inc * idx
+                    if indexing_dst is not None:
+                        offset += inc * torch.arange(idx.shape[0], dtype=torch.long)
 
-            selection = tuple(
-                None if i != cat_dim else index for i, _ in enumerate(data.shape)
-            )
-            data -= offset[selection]
+                size = indexing[cat_index][idx + 1] - indexing[cat_index][idx]
+                index = torch.arange(size.shape[0], dtype=torch.long).repeat_interleave(
+                    size
+                )
 
-            if indexing_dst is not None:
-                pass  # TODO inc dest tensor
+            if offset is not None:
+                selection = tuple(
+                    None if i != cat_dim else index for i, _ in enumerate(data.shape)
+                )
+                data += offset[selection]
 
         result[key] = data
 
@@ -366,9 +371,6 @@ def separate(
         else:
             keys = batch.keys
 
-    if idx is None and result == "batch":
-        raise NotImplementedError("feature not implemented yet")  # TODO
-
     if idx is not None:
         if isinstance(idx, int):
             idx = torch.tensor([idx], dtype=torch.long)
@@ -376,7 +378,12 @@ def separate(
     else:
         idx = torch.arange(indexing["num_structures"].item(), dtype=torch.long)
 
-    selecting_index, selected_index = _select_indexing(idx, keys, batching, indexing)
+    if idx is not None:
+        selecting_index, selected_index = _select_indexing(
+            idx, keys, batching, indexing
+        )
+    else:
+        selecting_index, selected_index = None, None
 
     if result == "batch" and idx is not None:
         indexing_dst = _destination_indexing(idx, indexing)
