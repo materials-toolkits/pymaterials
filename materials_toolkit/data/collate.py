@@ -259,6 +259,9 @@ def _select_and_decrement(
         if key not in batching:
             continue
 
+        if idx is None:
+            result[key] = batch[key].clone()
+
         inc = batching[key].inc
         cat_dim = batching[key].cat_dim
         cat_index = batching[key].shape[cat_dim]
@@ -272,8 +275,6 @@ def _select_and_decrement(
         else:
             current_idx = select_indexing[cat_index]
             data = batch[key].index_select(cat_dim, current_idx)
-
-        # TODO: skip when idx is None
 
         if inc != 0:
             if isinstance(inc, str):
@@ -305,8 +306,11 @@ def _destination_indexing(
     selected = {}
 
     for key, index in indexing.items():
-        size = index[idx + 1] - index[idx]
-        selected[key] = F.pad(torch.cumsum(size, 0), (1, 0))
+        if key == "num_structures":
+            selected[key] = torch.tensor([idx.shape[0]], dtype=torch.long)
+        else:
+            size = index.diff(dim=0)[idx]
+            selected[key] = F.pad(torch.cumsum(size, 0), (1, 0))
 
     return selected
 
@@ -374,7 +378,7 @@ def separate(
 
     selecting_index, selected_index = _select_indexing(idx, keys, batching, indexing)
 
-    if result == "batch":
+    if result == "batch" and idx is not None:
         indexing_dst = _destination_indexing(idx, indexing)
     else:
         indexing_dst = None
