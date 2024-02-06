@@ -182,13 +182,19 @@ class DatasetWithEnergy(metaclass=ABCMeta):
         def _recursive_add(
             cls,
             inclusion: Dict[DatasetWithEnergy.Entry, dict],
-            entries: Dict[DatasetWithEnergy.Entry, List[DatasetWithEnergy.Entry]],
+            filled_dict: Dict[DatasetWithEnergy.Entry, Set[DatasetWithEnergy.Entry]],
         ):
             for key, subdict in inclusion.items():
-                for subkey in subdict.keys():
-                    entries[subkey].extend(entries[key])
+                if key not in filled_dict:
+                    filled_dict[key] = {key}
 
-                cls._recursive_add(subdict, entries)
+                for subkey in subdict.keys():
+                    if subkey not in filled_dict:
+                        filled_dict[subkey] = {subkey}
+
+                    filled_dict[subkey].update(filled_dict[key])
+
+                cls._recursive_add(subdict, filled_dict)
 
         @classmethod
         def inclusion_graph(
@@ -204,6 +210,13 @@ class DatasetWithEnergy(metaclass=ABCMeta):
                     dict_entries[entry] = [entry.pd_entry]
                     cls._recursive_build(inclusion, dict_entries, entry)
 
-            cls._recursive_add(inclusion, dict_entries)
+            filled_dict = {}
+            cls._recursive_add(inclusion, filled_dict)
 
-            return dict_entries
+            results = {}
+            for key, included in filled_dict.items():
+                results[key] = []
+                for subkey in included:
+                    results[key].extend(dict_entries[subkey])
+
+            return results

@@ -87,6 +87,15 @@ class HDF5GroupWrapper(SelectableTensorMaping):
         return HDF5TensorWrapper(self.group[key])
 
 
+def _process_phase_diagram(args):
+    key, entry_lst = args
+    try:
+        hull = PhaseDiagram(entry_lst)
+    except ValueError:
+        hull = None
+    return (key, hull)
+
+
 class HDF5Dataset(data.Dataset, DatasetWithEnergy):
     data_class = StructureData
 
