@@ -14,7 +14,7 @@ pymatgen = ">=2023.7.17"
 spgrep = ">=0.3.0"
 h5py = "*"
 tqdm = "*"
-httpx = { version = "^0.22.0", source = "pypi" }
+httpx = "^0.23.0"
 
 [tool.poetry.group.test]
 optional = true
