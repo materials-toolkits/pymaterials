@@ -323,6 +323,17 @@ class StructureData(torch_geometric.data.Data):
         self._dataset = dataset
         return self
 
+    def append_edges(
+        self, edge_index: torch.LongTensor, target_cell: torch.LongTensor = None
+    ):
+        # wip edge (remove triplets + add target_cell)
+        if "edge_index" in self:
+            concat = torch.cat((self.edge_index, edge_index), dim=1)
+            perm = concat[0].argsort(stable=True)
+            self.edge_index = concat[:, perm]
+        else:
+            self.edge_index = edge_index
+
     def filter_apply(self, mask: torch.BoolTensor) -> torch_geometric.data.Data:
         data = {}
         masks = {}

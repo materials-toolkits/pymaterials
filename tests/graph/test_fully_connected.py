@@ -181,7 +181,55 @@ def test_fully_collected_masked():
     mask = torch.tensor([True, False, True], dtype=torch.bool)
     edges = fully_connected(num_nodes, mask=mask, self_loop=False, directed=False)
 
-    print(edges)
     edges = order_edges(edges)
 
     assert (edges == torch.tensor([[0, 0, 1, 7], [1, 2, 2, 8]])).all()
+
+    mask = torch.tensor([False, True, True], dtype=torch.bool)
+    edges = fully_connected(num_nodes, mask=mask, self_loop=False, directed=False)
+
+    edges = order_edges(edges)
+
+    assert (edges == torch.tensor([[3, 3, 3, 4, 4, 5, 7], [4, 5, 6, 5, 6, 6, 8]])).all()
+
+    mask = torch.tensor([False, False, True], dtype=torch.bool)
+    edges = fully_connected(num_nodes, mask=mask, self_loop=False, directed=False)
+
+    edges = order_edges(edges)
+
+    assert (edges == torch.tensor([[7], [8]])).all()
+
+    mask = torch.tensor([False, True, True], dtype=torch.bool)
+    edges = fully_connected(num_nodes, mask=mask, self_loop=False, directed=False)
+
+    edges = order_edges(edges)
+
+    assert (edges == torch.tensor([[3, 3, 3, 4, 4, 5, 7], [4, 5, 6, 5, 6, 6, 8]])).all()
+
+    mask = torch.tensor([True, False, False], dtype=torch.bool)
+    edges = fully_connected(num_nodes, mask=mask, self_loop=False, directed=False)
+
+    edges = order_edges(edges)
+
+    assert (edges == torch.tensor([[0, 0, 1], [1, 2, 2]])).all()
+
+    mask = torch.tensor([False, True, False], dtype=torch.bool)
+    edges = fully_connected(num_nodes, mask=mask, self_loop=False, directed=False)
+
+    edges = order_edges(edges)
+
+    assert (edges == torch.tensor([[3, 3, 3, 4, 4, 5], [4, 5, 6, 5, 6, 6]])).all()
+
+    mask = torch.tensor([False, False, False], dtype=torch.bool)
+    edges = fully_connected(num_nodes, mask=mask, self_loop=False, directed=False)
+
+    edges = order_edges(edges)
+
+    assert (edges == torch.tensor([[], []])).all()
+
+    mask = torch.tensor([False, True, False], dtype=torch.bool)
+    edges = fully_connected(num_nodes, mask=mask, self_loop=False, directed=False)
+
+    edges = order_edges(edges)
+
+    assert (edges == torch.tensor([[3, 3, 3, 4, 4, 5], [4, 5, 6, 5, 6, 6]])).all()
