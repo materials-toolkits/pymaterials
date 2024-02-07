@@ -23,9 +23,12 @@ def compare_data_poscar(data: StructureData, poscar: str) -> bool:
     return matcher.fit(struct1, struct2)
 
 
+def compare_energy_above_hull(data: StructureData, energy: float) -> bool:
+    return (data.energy_above_hull - energy).abs().item() < 2e-2
+
+
 @pytest.mark.timeout(30)
 def test_materials_project_dataset(mp_tmp_path):
-    return
     dataset = MaterialsProject(mp_tmp_path)
 
     assert len(dataset) == 133420
@@ -53,6 +56,7 @@ def test_materials_project_dataset(mp_tmp_path):
     0.1676289650000000    0.3352579300000000    0.7500000000000000 Sn
     0.6647420700000000    0.8323710350000000    0.7500000000000000 Sn""",
     )
+    assert compare_energy_above_hull(dataset[0], 0.0)
 
     assert compare_data_poscar(
         dataset[99610],
@@ -73,6 +77,8 @@ def test_materials_project_dataset(mp_tmp_path):
     0.6666666666666666    0.3333333333333333    0.2500000000000000 Al
     0.3333333333333334    0.6666666666666667    0.7500000000000000 Al""",
     )
+    assert compare_energy_above_hull(dataset[99610], 0.0)
+
     assert compare_data_poscar(
         dataset[106281],
         """Er1 Cu1 Si1
@@ -87,6 +93,8 @@ def test_materials_project_dataset(mp_tmp_path):
     0.0000000000000000    0.0000000000000000    0.5000000000000000 Cu+
     0.3333333333333333    0.6666666666666666    0.5000000000000000 Si4-""",
     )
+    assert compare_energy_above_hull(dataset[106281], 0.031)
+
     assert compare_data_poscar(
         dataset[113653],
         """Cr8 Pb40 O64
@@ -210,6 +218,8 @@ def test_materials_project_dataset(mp_tmp_path):
     0.0057550000000000    0.9047290000000001    0.4398150000000001 O2-
     0.5136720000000001    0.2273280000000000    0.6929770000000000 O2-""",
     )
+    assert compare_energy_above_hull(dataset[113653], 0.015)
+
     assert compare_data_poscar(
         dataset[8644],
         """Ti4 H32 O12 F24
@@ -293,6 +303,8 @@ def test_materials_project_dataset(mp_tmp_path):
     0.3693430000000001    0.2513480000000001    0.7042990000000000 F-
     0.1306569999999998    0.2513480000000001    0.2042990000000000 F-""",
     )
+    assert compare_energy_above_hull(dataset[8644], 0.0)
+
     assert compare_data_poscar(
         dataset[115773],
         """H48 C8 S8 Br8 N24
@@ -400,6 +412,8 @@ def test_materials_project_dataset(mp_tmp_path):
     0.3281190000000000    0.9839399999999999    0.8292359999999998 N3-
     0.1718810000000000    0.0160600000000001    0.3292359999999999 N3-""",
     )
+    assert compare_energy_above_hull(dataset[115773], 0.14)
+
     assert compare_data_poscar(
         dataset[20421],
         """Ba16 In16 O38
@@ -481,6 +495,8 @@ def test_materials_project_dataset(mp_tmp_path):
     0.5008569500000002    0.2578798500000000    0.5058752700000000 O2-
     0.4986041700000000    0.5000000000000000    0.5870538700000000 O2-""",
     )
+    assert compare_energy_above_hull(dataset[20421], 0.017)
+
     assert compare_data_poscar(
         dataset[-1],
         """Mg4 Sb8
@@ -504,3 +520,4 @@ def test_materials_project_dataset(mp_tmp_path):
     0.1501050000000000    0.5000000000000000    0.3802450000000001 Sb-
     0.2911920000000000    0.0000000000000000    0.0399710000000000 Sb-""",
     )
+    assert compare_energy_above_hull(dataset[-1], 0.19)

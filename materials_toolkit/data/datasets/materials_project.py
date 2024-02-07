@@ -28,7 +28,7 @@ class MaterialsProject(HDF5Dataset):
             pre_transform,
             pre_filter,
             url="https://huggingface.co/datasets/materials-toolkits/materials-project/resolve/main/materials-project.tar.gz",
-            md5="0793d36092c8bc9e813d266eceadfe36",
+            md5="e8d2d6b877e5e59e214cb1a4519b7ac3",
             scalars_keys=["energy_pa"],
             in_memory=in_memory,
             **kwargs

@@ -87,15 +87,6 @@ class HDF5GroupWrapper(SelectableTensorMaping):
         return HDF5TensorWrapper(self.group[key])
 
 
-def _process_phase_diagram(args):
-    key, entry_lst = args
-    try:
-        hull = PhaseDiagram(entry_lst)
-    except ValueError:
-        hull = None
-    return (key, hull)
-
-
 class HDF5Dataset(data.Dataset, DatasetWithEnergy):
     data_class = StructureData
 
@@ -222,7 +213,6 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
         if self.url is None:
             return
 
-        print("compressed_file", self.compressed_file)
         if os.path.exists(self.compressed_file):
             return False
 
@@ -249,7 +239,7 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
         indexing = {key: torch.from_numpy(d[:]) for key, d in file["indexing"].items()}
         length = indexing["num_structures"].item()
 
-        if "energy_above_hull" in file:
+        if "energy_above_hull" in file["data"]:
             return
 
         entries = []
@@ -358,7 +348,6 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
         )
 
         if preprocessing:
-            raise NotImplementedError("preprocessing is not implemented yet")
             raw_data = h5py.File(self.raw_file, "r")
 
             data_hdf5 = HDF5GroupWrapper(raw_data["data"], self.in_memory)
@@ -366,30 +355,14 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
                 key: torch.from_numpy(d[:]) for key, d in raw_data["indexing"].items()
             }
 
-            class StructureIterator(Iterable[StructureData]):
-                def __init__(
-                    self,
-                    data: HDF5GroupWrapper,
-                    indexing: Dict[str, torch.LongTensor],
-                    data_type,
-                ):
-                    self.data = data
-                    self.indexing = indexing
-                    self.data_type = data_type
-
-                def __len__(self) -> int:
-                    return 1 << 10
-                    return self.indexing["num_structures"].items()
-
-                def __iter__(self) -> StructureData:
-                    for i in range(len(self)):
-                        print(i)
-                        yield separate(
-                            self.data, i, cls=self.data_type, indexing=self.indexing
-                        )
-
             processed_dataset = []
-            it = StructureIterator(data_hdf5, indexing, self.data_class)
+            it = separate(
+                data_hdf5,
+                idx=None,
+                cls=self.data_class,
+                indexing=indexing,
+                result="iterator",
+            )
 
             for struct in tqdm(it, desc="preprocessing", unit="structure", leave=False):
                 if self.pre_filter is not None:
@@ -441,6 +414,3 @@ class HDF5Dataset(data.Dataset, DatasetWithEnergy):
 
         if self.in_memory:
             self.data_hdf5.load_all()
-
-    def __del__(self):
-        self.close()

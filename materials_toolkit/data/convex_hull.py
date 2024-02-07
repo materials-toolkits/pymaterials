@@ -63,7 +63,10 @@ class DatasetWithEnergy(metaclass=ABCMeta):
     ) -> torch.FloatTensor:
         if entry is not None:
             hull = self.calculate_convex_hull(entry=entry)
-            return hull.get_e_above_hull(entry.pd_entry)
+            if hull is not None:
+                return hull.get_e_above_hull(entry.pd_entry)
+
+            return torch.tensor([float("nan")], dtype=torch.float32)
 
         if struct.num_structures.item() > 1:
             energies = []

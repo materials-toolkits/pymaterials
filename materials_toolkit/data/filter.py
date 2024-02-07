@@ -11,21 +11,15 @@ from abc import ABCMeta, abstractmethod
 
 class Filter(nn.Module, metaclass=ABCMeta):
     @abstractmethod
-    def forward(self, struct: StructureData) -> bool | torch.BoolTensor:
+    def forward(self, struct: StructureData) -> bool:
         pass
 
 
 class SequentialFilter(nn.ModuleList, Filter):
-    def forward(self, struct: StructureData) -> bool | torch.BoolTensor:
-        if isinstance(struct, Batch):
-            for filter in self.modules():
-                mask = filter(struct)
+    def forward(self, struct: StructureData) -> bool:
+        assert struct.num_structures == 1
 
-                assert isinstance(mask, torch.BoolTensor)
-
-                struct = struct.filter_apply(mask)
-
-        for filter in self.modules():
+        for filter in self:
             if not filter(struct):
                 return False
 
@@ -92,3 +86,18 @@ class FilterAtoms(Filter):
 class FilterNobleGas(FilterAtoms):
     def __init__(self):
         super().__init__(excluded=[2, 10, 18, 36, 54, 86, 118])
+
+
+class FilterStable(Filter):
+    def __init__(self, e_above_hull: float = 0.1):
+        super().__init__()
+
+        self.threshold = nn.Parameter(
+            torch.tensor(e_above_hull, dtype=torch.float32), requires_grad=False
+        )
+
+    def forward(self, struct: StructureData) -> bool | torch.BoolTensor:
+        if isinstance(struct, Batch):
+            return struct.energy_above_hull <= self.threshold
+
+        return (struct.energy_above_hull <= self.threshold).item()
