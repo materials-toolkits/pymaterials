@@ -7,19 +7,16 @@ from torch_geometric import data
 import h5py
 import numpy as np
 from tqdm import tqdm
-from tqdm.contrib.concurrent import process_map, thread_map
 
-from typing import Iterable, Iterator, List, Tuple, Any, Optional, Union, Callable, Dict
+from typing import Iterator, List, Optional, Union, Callable, Dict
 import os
 import shutil
 import json
 import hashlib
-import warnings
 
 from materials_toolkit.data.convex_hull import DatasetWithEnergy
 from pymatgen.analysis.phase_diagram import PDEntry, PhaseDiagram
 from pymatgen.core.composition import Composition
-from pymatgen.core import Element
 from torch_scatter import scatter_mul
 
 from .utils import uncompress_progress, download_progress, get_filename
