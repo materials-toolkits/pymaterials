@@ -2,6 +2,7 @@ import torch
 import torch_geometric
 from torch_geometric.data import Dataset
 import numpy as np
+from torch_scatter import scatter_add
 
 import json
 import typing
@@ -331,8 +332,36 @@ class StructureData(torch_geometric.data.Data):
             concat = torch.cat((self.edge_index, edge_index), dim=1)
             perm = concat[0].argsort(stable=True)
             self.edge_index = concat[:, perm]
+
+            if hasattr("target_cell", self._store) and (target_cell is not None):
+                concat = torch.cat((self.target_cell, target_cell), dim=0)
+                self.target_cell = concat[perm]
+            elif hasattr("target_cell", self._store) and (target_cell is None):
+                concat = torch.cat(
+                    (
+                        self.target_cell,
+                        torch.zeros((self.edge_index.shape[1], 3), dtype=torch.long),
+                    ),
+                    dim=0,
+                )
+                self.target_cell = concat[perm]
+            elif target_cell is not None:
+                concat = torch.cat(
+                    (self.target_cell, target_cell), dim=0
+                )  # default value of target_cell
+                self.target_cell = concat[perm]
         else:
             self.edge_index = edge_index
+            if target_cell is not None:
+                self.target_cell = target_cell
+
+        idx, num_edges_per_atom = torch.unique(
+            self.edge_index[0], sorted=True, return_counts=True
+        )
+        num_edges = scatter_add(
+            num_edges_per_atom, self.batch_atoms[idx], 0, dim_size=self.num_edges
+        )
+        self.num_edges = num_edges
 
     def filter_apply(self, mask: torch.BoolTensor) -> torch_geometric.data.Data:
         data = {}
