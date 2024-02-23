@@ -8,7 +8,8 @@ import json
 import typing
 from typing import Any, Optional, Union, Dict, Callable, Tuple
 from dataclasses import dataclass
-import functools
+
+from materials_toolkit.data.graph.neighbours_graph import NeighboursGraphBuilder
 
 
 class BatchingEncoder(json.JSONEncoder):
@@ -327,6 +328,7 @@ class StructureData(torch_geometric.data.Data):
     def append_edges(
         self, edge_index: torch.LongTensor, target_cell: torch.LongTensor = None
     ):
+        raise NotImplementedError("not tested")
         # wip edge (remove triplets + add target_cell)
         if "edge_index" in self:
             concat = torch.cat((self.edge_index, edge_index), dim=1)
@@ -362,6 +364,34 @@ class StructureData(torch_geometric.data.Data):
             num_edges_per_atom, self.batch_atoms[idx], 0, dim_size=self.num_edges
         )
         self.num_edges = num_edges
+
+    def build_graph(self, knn: int = 0, cutoff: float = 0):
+        assert self.periodic.all()
+
+        builder = NeighboursGraphBuilder(
+            self.cell,
+            self.pos,
+            self.num_atoms,
+            knn=knn,
+            cutoff=cutoff,
+            symetric=False,
+            compute_reverse_idx=False,
+            check_tensor=False,
+        )
+        builder.build()
+
+        self.edge_index = builder.edges[:, :2].t()
+        self.target_cell = builder.edges[:, 2:]
+
+        self.batch_edges = self.batch_atoms[self.edge_index[0]]
+        self.num_edges = scatter_add(
+            torch.ones_like(self.batch_edges),
+            self.batch_edges,
+            dim_size=self.num_structures.item(),
+        )
+
+    def build_tripets(self):
+        pass
 
     def filter_apply(self, mask: torch.BoolTensor) -> torch_geometric.data.Data:
         data = {}

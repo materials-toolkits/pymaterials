@@ -4,6 +4,14 @@ The `data` module is designed to store chemical data in a convenient way for mac
 
 from .dataset import HDF5Dataset
 from .base import StructureData, Batching, batching
+from .loader import StructureLoader
 from . import datasets
 
-__all__ = ["HDF5Dataset", "StructureData", "Batching", "batching", "datasets"]
+__all__ = [
+    "HDF5Dataset",
+    "StructureData",
+    "Batching",
+    "batching",
+    "datasets",
+    "StructureLoader",
+]

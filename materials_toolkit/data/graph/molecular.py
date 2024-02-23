@@ -43,5 +43,5 @@ def graph_knn(
 
     perm = edges[0].argsort(stable=True)
 
-    distance = distance[:, perm]
+    distance = distance[perm]
     edges = edges[:, perm]
