@@ -6,6 +6,7 @@ from .dataset import HDF5Dataset
 from .base import StructureData, Batching, batching
 from .loader import StructureLoader
 from . import datasets
+from .collate import collate, separate
 
 __all__ = [
     "HDF5Dataset",
@@ -14,4 +15,6 @@ __all__ = [
     "batching",
     "datasets",
     "StructureLoader",
+    "collate",
+    "separate",
 ]

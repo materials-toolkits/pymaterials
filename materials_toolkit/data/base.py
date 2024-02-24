@@ -10,6 +10,13 @@ from typing import Any, Optional, Union, Dict, Callable, Tuple
 from dataclasses import dataclass
 
 from materials_toolkit.data.graph.neighbours_graph import NeighboursGraphBuilder
+from materials_toolkit.data.graph.triplets import TripletsBuilder
+import materials_toolkit.data
+
+from pymatgen.core import Structure
+from pymatgen.io.cif import CifParser
+
+import os
 
 
 class BatchingEncoder(json.JSONEncoder):
@@ -321,6 +328,34 @@ class StructureData(torch_geometric.data.Data):
         self.num_structures = torch.tensor([num_structures], dtype=torch.long)
         self._dataset = dataset
 
+    @classmethod
+    def load(cls, filename: str):
+        if os.path.splitext(filename)[1] != ".cif":
+            struct = Structure.from_file(filename)
+
+            return cls(
+                z=torch.tensor(struct.atomic_numbers, dtype=torch.long),
+                pos=torch.from_numpy(struct.frac_coords).float(),
+                cell=torch.from_numpy(struct.lattice.matrix.copy())
+                .float()
+                .unsqueeze(0),
+            )
+
+        parser = CifParser(filename)
+        structures = []
+        for struct in parser.get_structures():
+            structures.append(
+                cls(
+                    z=torch.tensor(struct.atomic_numbers, dtype=torch.long),
+                    pos=torch.from_numpy(struct.frac_coords).float(),
+                    cell=torch.from_numpy(struct.lattice.matrix.copy())
+                    .float()
+                    .unsqueeze(0),
+                )
+            )
+
+        return materials_toolkit.data.collate(structures, cls)
+
     def set_dataset(self, dataset: Dataset):
         self._dataset = dataset
         return self
@@ -328,17 +363,16 @@ class StructureData(torch_geometric.data.Data):
     def append_edges(
         self, edge_index: torch.LongTensor, target_cell: torch.LongTensor = None
     ):
-        raise NotImplementedError("not tested")
         # wip edge (remove triplets + add target_cell)
         if "edge_index" in self:
             concat = torch.cat((self.edge_index, edge_index), dim=1)
             perm = concat[0].argsort(stable=True)
             self.edge_index = concat[:, perm]
 
-            if hasattr("target_cell", self._store) and (target_cell is not None):
+            if hasattr(self._store, "target_cell") and (target_cell is not None):
                 concat = torch.cat((self.target_cell, target_cell), dim=0)
                 self.target_cell = concat[perm]
-            elif hasattr("target_cell", self._store) and (target_cell is None):
+            elif hasattr(self._store, "target_cell") and (target_cell is None):
                 concat = torch.cat(
                     (
                         self.target_cell,
@@ -361,9 +395,13 @@ class StructureData(torch_geometric.data.Data):
             self.edge_index[0], sorted=True, return_counts=True
         )
         num_edges = scatter_add(
-            num_edges_per_atom, self.batch_atoms[idx], 0, dim_size=self.num_edges
+            num_edges_per_atom,
+            self.batch_atoms[idx],
+            0,
+            dim_size=self.num_structures.item(),
         )
         self.num_edges = num_edges
+        self.batch_edges = self.batch_atoms[self.edge_index[0]]
 
     def build_graph(self, knn: int = 0, cutoff: float = 0):
         assert self.periodic.all()
@@ -391,7 +429,19 @@ class StructureData(torch_geometric.data.Data):
         )
 
     def build_tripets(self):
-        pass
+        builder = TripletsBuilder(self.num_atoms, self.edge_index)
+        builder.build()
+
+        self.triplet_index = builder.triplets
+
+        self.batch_triplets = self.batch_atoms[
+            self.edge_index[0, self.triplet_index[0]]
+        ]
+        self.num_triplets = scatter_add(
+            torch.ones_like(self.batch_triplets),
+            self.batch_triplets,
+            dim_size=self.num_structures.item(),
+        )
 
     def filter_apply(self, mask: torch.BoolTensor) -> torch_geometric.data.Data:
         data = {}

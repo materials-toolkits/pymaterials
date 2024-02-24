@@ -18,7 +18,7 @@ class TripletsBuilder:
         self.edges = edge_index
 
         self.num_atoms = num_atoms
-        self.struct_idx = torch.arange(self.shapes.b, device=self.shapes.device)
+        self.struct_idx = torch.arange(num_atoms.shape[0], device=num_atoms.device)
         self.batch = self.struct_idx.repeat_interleave(num_atoms)
 
         self.triplets = None
@@ -39,4 +39,4 @@ class TripletsBuilder:
         i_triplets = i_triplets[mask]
         j_triplets = j_triplets[mask]
 
-        self.triplets_index = torch.stack((i_triplets, j_triplets), dim=0)
+        self.triplets = torch.stack((i_triplets, j_triplets), dim=0)
