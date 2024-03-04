@@ -3,22 +3,15 @@
 A prototype crystal line graph network dgl implementation.
 """
 
-from typing import Tuple, Union
-
-import numpy as np
 import torch
-
-# from dgl.nn.functional import edge_softmax
-from typing import Literal
 from torch import nn
 from torch.nn import functional as F
-
 from torch_scatter import scatter_add, scatter_mean
 
 from .utils import RBFExpansion, BaseSettings
-
 from materials_toolkit.data import StructureData
 
+from typing import Tuple, Union, Literal
 import os, json
 
 
@@ -43,7 +36,6 @@ class ALIGNNConfig(BaseSettings):
     zero_inflated: bool = False
     classification: bool = False
     num_classes: int = 2
-    extra_features: int = 0
 
     class Config:
         """Configure model settings behavior."""
@@ -242,25 +234,6 @@ class ALIGNN(nn.Module):
         else:
             self.fc = nn.Linear(config.hidden_features, config.output_features)
 
-        if config.extra_features != 0:
-            # Credit for extra_features work:
-            # Gong et al., https://doi.org/10.48550/arXiv.2208.05039
-            self.extra_feature_embedding = MLPLayer(
-                config.extra_features, config.extra_features
-            )
-            self.fc3 = nn.Linear(
-                config.hidden_features + config.extra_features,
-                config.output_features,
-            )
-            self.fc1 = MLPLayer(
-                config.extra_features + config.hidden_features,
-                config.extra_features + config.hidden_features,
-            )
-            self.fc2 = MLPLayer(
-                config.extra_features + config.hidden_features,
-                config.extra_features + config.hidden_features,
-            )
-
         self.link = None
         self.link_name = config.link
         if config.link == "identity":
@@ -268,7 +241,7 @@ class ALIGNN(nn.Module):
         elif config.link == "log":
             self.link = torch.exp
             avg_gap = 0.7  # magic number -- average bandgap in dft_3d
-            self.fc.bias.data = torch.tensor(np.log(avg_gap), dtype=torch.float)
+            self.fc.bias.data = torch.tensor(avg_gap, dtype=torch.float).log()
         elif config.link == "logit":
             self.link = torch.sigmoid
 
